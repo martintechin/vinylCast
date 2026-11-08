@@ -19,7 +19,8 @@ tone_beep_s = 0
 # 48000, 44100, 32000, 22050, 16000, 11025.
 sample_rate = 44100
 
-# Codec: "mp3" or "flac"
+# Codec: "mp3" (default, proven on both targets) or "flac". Both are kept (M6 decision);
+# changing it needs a service restart.
 codec = "mp3"
 mp3_bitrate = "320k"
 

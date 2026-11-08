@@ -81,6 +81,22 @@ Precedence: built-in defaults < TOML < flags.
 | Peak logging (`peak_log_s`) | Silences the stream on the Pi's ffmpeg 7 (both variants); off by default | Needs ffmpeg 7's error lines from a failed run |
 | Wi-Fi power save off after reboot | Set via nmcli on the netplan connection; persistence unverified | `iw dev wlan0 get power_save` after a reboot |
 
-## Results (M6)
+## Codec decision (M6)
 
-To be filled in: codec × target × pass/fail × CPU × startup latency × notes.
+**Decided (Martin, 2026-11-08): keep both codecs, MP3 320k is the default.** PLAN.md framed M6
+as FLAC *or* MP3 for revision 1; instead both stay, and M6 only decides the default. FLAC is a
+setting (`codec = "flac"` in vinylcast.toml, or `--codec flac`); changing it needs a service
+restart (the receiver reconnects, ~3-4 s of silence). Whether FLAC becomes the default is
+decided by a FLAC soak / codec comparison later.
+
+Evidence so far (short runs, no soak):
+
+| Codec | Target | Result | CPU | Startup | Notes |
+| --- | --- | --- | --- | --- | --- |
+| MP3 320k | Tvättstugan (Nest Mini) | plays (tone, vinyl) | not measured | 2.5-3.6 s | M3/M4; service start/stop clean |
+| MP3 320k | HESTON 120 | plays (vinyl) | not measured | not measured | Cast Lite, same HTTP behaviour |
+| FLAC | Tvättstugan (Nest Mini) | plays (tone) | not measured | 3.9 s | survives encoder restart (frame numbers reset) |
+| FLAC | HESTON 120 | not tested | | | |
+| either | Cast group | not tested | | | no group yet |
+
+Framing CPU on the Pi 3 (bench_framing.py, 20 s noise): MP3 0.13 %, FLAC 0.25 % of one core.

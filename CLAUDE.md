@@ -28,7 +28,8 @@ tests/fixtures/make_fixtures.sh                # regenerate framing fixtures (ff
 ## Status
 M0-M4 done. M5 code done; the 60-min soak run is deferred by Martin (see README "Deferred / open
 items", which also lists the open group checks, loud-record level check, peak logging on ffmpeg 7
-and Wi-Fi power-save persistence). Targets in use: "HESTON 120" (192.168.1.65) and
+and Wi-Fi power-save persistence). Codec decision (M6, Martin): keep BOTH codecs, MP3 320k is the default, FLAC is a setting; do
+not remove either path. Targets in use: "HESTON 120" (192.168.1.65) and
 "Tvättstugan" (Nest Mini, 192.168.1.124); both "Cast Lite" receivers.
 
 ## Working rules
