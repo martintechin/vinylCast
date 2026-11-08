@@ -1,7 +1,8 @@
 """ffmpeg subprocess lifecycle: stdout chunks, stderr parsing, restart with backoff.
 
 One ffmpeg process at a time. Its stdout is read in chunks and handed to `sink`; its
-stderr is logged to metrics line by line. If ffmpeg exits or stdout stalls for longer
+stderr is logged to metrics line by line. `on_start` runs before each process's first
+chunk so downstream state (framing) can reset. If ffmpeg exits or stdout stalls for longer
 than `stall_timeout_s`, it is killed and restarted after a backoff delay. The sink and
 whoever consumes it (hub, clients) are not touched by a restart.
 """
@@ -35,7 +36,8 @@ def codec_args(cfg: Config) -> list[str]:
             "-f", "mp3",
         ]  # fmt: skip
     if cfg.codec == "flac":
-        return ["-c:a", "flac", "-f", "flac"]
+        # 16-bit like the UFO202, also for tone/file sources whose native format differs.
+        return ["-sample_fmt", "s16", "-c:a", "flac", "-f", "flac"]
     raise ValueError(f"unknown codec {cfg.codec!r}")
 
 
@@ -66,6 +68,7 @@ class Encoder:
         backoff_s: Sequence[float] = BACKOFF_S,
         stable_after_s: float = STABLE_AFTER_S,
         chunk_size: int = CHUNK_SIZE,
+        on_start: Callable[[], None] | None = None,
     ) -> None:
         self._cmd = list(cmd)
         self._sink = sink
@@ -74,6 +77,7 @@ class Encoder:
         self._backoff_s = tuple(backoff_s)
         self._stable_after_s = stable_after_s
         self._chunk_size = chunk_size
+        self._on_start = on_start
         self._proc: asyncio.subprocess.Process | None = None
         self._stopping = asyncio.Event()
         self.state = EncoderState.IDLE
@@ -123,6 +127,8 @@ class Encoder:
             return "exit", None
         self._proc = proc
         self._metrics.event("encoder_start", pid=proc.pid, attempt=attempt)
+        if self._on_start is not None:
+            self._on_start()  # e.g. framer reset: a new process starts a new stream
         stderr_task = asyncio.create_task(self._read_stderr(proc))
         try:
             reason = await self._pump(proc)

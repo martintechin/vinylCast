@@ -8,23 +8,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
-from collections.abc import Callable
 from typing import Any
 
 from vinylcast.config import Config
 from vinylcast.encoder import Encoder, build_command
+from vinylcast.framing import make_framer
 from vinylcast.hub import Hub
 from vinylcast.metrics import Metrics, Sampler
 from vinylcast.server import StreamServer, stream_url
-
-
-def chunk_duration_fn(cfg: Config) -> Callable[[bytes], float]:
-    """Audio duration of an encoded chunk. MP3 is CBR, so bytes map directly to time.
-    M2 replaces this with exact per-frame durations from framing."""
-    if cfg.codec != "mp3":
-        raise NotImplementedError("FLAC streaming needs M2 framing")
-    bytes_per_s = cfg.mp3_bitrate_bps / 8
-    return lambda data: len(data) / bytes_per_s
 
 
 class Service:
@@ -32,18 +23,43 @@ class Service:
         self.cfg = cfg
         self.metrics = Metrics(cfg.metrics_path)
         self.hub = Hub(cfg.client_max_buffer_s, self.metrics)
-        duration = chunk_duration_fn(cfg)
+        self.framer = make_framer(cfg.codec, self._on_flac_header)
         self.encoder = Encoder(
             build_command(cfg),
-            lambda data: self.hub.publish(data, duration(data)),
+            self._on_chunk,
             self.metrics,
+            on_start=self._on_encoder_start,
             **encoder_kw,
         )
-        self.server = StreamServer(cfg, self.hub, self.metrics, self.encoder.status)
+        self.server = StreamServer(
+            cfg, self.hub, self.metrics, self.encoder.status, lambda: self.framer.stream_header
+        )
         self.sampler = Sampler(
             self.metrics, self.hub.stats, lambda: self.encoder.pid, sample_interval_s
         )
         self._tasks: list[asyncio.Task[None]] = []
+
+    def _on_chunk(self, data: bytes) -> None:
+        skipped = self.framer.skipped_bytes
+        for frame in self.framer.feed(data):
+            self.hub.publish(frame.data, frame.duration_s)
+        if self.framer.skipped_bytes != skipped:
+            self.metrics.event(
+                "framing_skipped", bytes=self.framer.skipped_bytes - skipped, codec=self.cfg.codec
+            )
+
+    def _on_encoder_start(self) -> None:
+        self.framer.reset()
+
+    def _on_flac_header(self, header: bytes, old: bytes | None) -> None:
+        if old is None:
+            self.metrics.event("flac_header", status="captured", bytes=len(header))
+        elif header == old:
+            self.metrics.event("flac_header", status="unchanged", bytes=len(header))
+        else:
+            # Clients already decoding with the old STREAMINFO cannot continue safely.
+            self.metrics.event("flac_header", status="changed", bytes=len(header))
+            self.hub.close("flac_header_changed")
 
     async def start(self, port: int | None = None) -> int:
         bound = await self.server.start(port=port)

@@ -66,11 +66,13 @@ class StreamServer:
         hub: Hub,
         metrics: Metrics,
         encoder_status: Callable[[], dict[str, Any]],
+        stream_header: Callable[[], bytes | None] = lambda: None,
     ) -> None:
         self._cfg = cfg
         self._hub = hub
         self._metrics = metrics
         self._encoder_status = encoder_status
+        self._stream_header = stream_header
         self._started = time.monotonic()
         self._runner: web.AppRunner | None = None
         self.port: int | None = None
@@ -126,9 +128,19 @@ class StreamServer:
         )
         reason = "client_gone"
         try:
-            while (data := await sub.get()) is not None:
+            first = await sub.get()
+            if first is not None:
+                # FLAC: a mid-stream joiner needs the cached stream header before its first
+                # frame. Fetched after the first frame arrives, so it is always captured.
+                header = self._stream_header()
+                if header:
+                    await resp.write(header)
+                    self._hub.record_sent(sub, len(header))
+            data = first
+            while data is not None:
                 await resp.write(data)
                 self._hub.record_sent(sub, len(data))
+                data = await sub.get()
         except ConnectionError:
             pass  # includes aiohttp's ClientConnectionResetError
         finally:

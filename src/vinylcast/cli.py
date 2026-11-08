@@ -61,9 +61,6 @@ def _not_implemented(milestone: str) -> Callable[[Config, argparse.Namespace], i
 def _serve(cfg: Config, args: argparse.Namespace) -> int:
     from vinylcast.service import run_serve
 
-    if cfg.codec != "mp3":
-        print("serve: FLAC streaming is not implemented until M2", file=sys.stderr)
-        return EXIT_NOT_IMPLEMENTED
     return asyncio.run(run_serve(cfg))
 
 

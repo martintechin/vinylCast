@@ -4,7 +4,7 @@
 or other clients. Each queue is bounded by the *audio duration* it holds rather than a
 item count. Late joiners get no history: they start at the next published item.
 
-In M1 an item is an encoder chunk; from M2 on it is a whole frame.
+Items are whole frames (from framing), each tagged with its exact audio duration.
 """
 
 from __future__ import annotations

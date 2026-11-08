@@ -3,8 +3,8 @@
 PoC: turntable → phono preamp → Behringer UFO202 → Raspberry Pi 3 → HTTP audio stream → Chromecast device or Cast group.
 See [PLAN.md](PLAN.md) for scope, milestones and acceptance criteria.
 
-Status: **M1 (encode and serve)** — `serve` streams MP3 from the `tone`, `file` or `alsa` source.
-FLAC (M2) and Cast (M3) are not implemented yet.
+Status: **M2 (framing)** — `serve` streams MP3 or FLAC (`--codec flac`) from the `tone`, `file`
+or `alsa` source; clients joining mid-stream get a decodable stream. Cast (M3) is not implemented yet.
 
 ## Quick start (no hardware)
 

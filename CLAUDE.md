@@ -7,6 +7,8 @@ PLAN.md is the source of truth for scope, milestones (M0–M6) and acceptance cr
 working. Check `git log` for which milestone is done; each milestone commit body holds its evidence.
 
 ## Commands
+Dev and run box is the Raspberry Pi (Martin's desktop is Windows; it is only used as a player:
+VLC / ffplay / Edge on `http://<pi-ip>:8800/stream.mp3`). This cloud container also runs Linux.
 ```sh
 python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[dev]'   # needs ffmpeg on PATH
 ruff check . && ruff format --check .          # lint + format check (ruff format . to fix)
@@ -14,7 +16,10 @@ pytest -q                                      # full suite, ~12 s; ffmpeg tests
 pytest tests/test_hub.py::test_fan_out         # single test
 pytest -k slow                                 # by name
 vinylcast serve --source tone                  # dev-machine stream, no hardware; prints URL
+vinylcast serve --source tone --codec flac     # FLAC variant
 python -m vinylcast --help                     # all subcommands; unimplemented ones exit 3
+python scripts/bench_framing.py 20             # framing CPU cost per codec
+tests/fixtures/make_fixtures.sh                # regenerate framing fixtures (ffmpeg)
 ```
 
 ## Working rules
@@ -35,10 +40,13 @@ python -m vinylcast --help                     # all subcommands; unimplemented 
   `CONFIG_KEYS` + an override flag in cli.py, and config.example.toml (a test asserts the example
   file equals the defaults). Precedence: defaults < TOML < explicitly passed flags. `cast_target` is `--to`.
 - `Hub.publish(data, duration_s)` is synchronous and its queue limit is in seconds of audio, so every
-  producer must tag items with their true duration. M1 derives it from the CBR bitrate
-  (`service.chunk_duration_fn`); M2 framing replaces that with per-frame durations.
-- The encoder only knows a `sink: Callable[[bytes], None]`; framing (M2) slots in between encoder and
-  hub inside service.py, without touching either.
+  producer must tag items with their true duration; framing provides it per frame.
+- service.py is the only place the audio path is wired: encoder `sink` -> framer.feed -> hub.publish.
+  The encoder's `on_start` hook resets the framer for each new ffmpeg process; for FLAC the
+  framer re-captures the stream header and service compares it (changed -> all clients dropped).
+  The server writes `framer.stream_header` to a new client right before its first frame.
+- Known open issue: after an encoder restart FLAC frame numbers restart at 0, so connected FLAC
+  clients see timestamps jump backwards (audio decodes; see tests/test_stream_e2e.py).
 - Every observable event goes through `Metrics.event(name, **fields)` into JSONL (`kind` = event |
   sample). Event names (`encoder_restart`, `client_slow`, `client_disconnect` with `reason`,
   `http_request` with all headers, ...) are what tests and the M5 soak summary read, so don't rename them.
@@ -56,7 +64,7 @@ audio path (one encoder, one hub; a new client costs a queue, not an encode)
       |
   encoder.py  one ffmpeg process -> stdout chunks; stderr -> metrics; restart w/ backoff
       |
-  framing.py  MP3 / FLAC frame boundaries, cached FLAC header (pure functions) [M2]
+  framing.py  MP3 / FLAC frame boundaries, cached FLAC header (pure functions)
       |
   hub.py      one producer -> N bounded per-client frame queues; slow client dropped
       |
