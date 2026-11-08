@@ -12,6 +12,7 @@ import contextlib
 import math
 import re
 import signal
+import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
@@ -19,8 +20,13 @@ from vinylcast import source
 from vinylcast.config import Config
 
 CLIP_WARN_DBFS = -1.0
-_FRAME = re.compile(r"^frame:\d+\s+pts:\d+\s+pts_time:([\d.]+)")
-_STAT = re.compile(r"^lavfi\.astats\.(\d+)\.(Peak_level|RMS_level)=(\S+)")
+# Readings come from ametadata's log output on stderr ("[Parsed_ametadata_3 @ 0x..] frame:..").
+# Not file=- (stdout): ffmpeg buffers that and flushed everything only at exit (bug found on
+# the Pi: `levels` looked hung). stderr is written line by line.
+_FRAME = re.compile(r"\bframe:\d+\s+pts:\d+\s+pts_time:([\d.]+)")
+_STAT = re.compile(r"\blavfi\.astats\.(\d+)\.(Peak_level|RMS_level)=(\S+)")
+_ERROR = re.compile(r"error|cannot|failed|no such", re.IGNORECASE)
+NO_DATA_TIMEOUT_S = 5.0
 
 
 def build_command(cfg: Config, ffmpeg: str = "ffmpeg") -> list[str]:
@@ -30,11 +36,11 @@ def build_command(cfg: Config, ffmpeg: str = "ffmpeg") -> list[str]:
             f"asetnsamples=n={cfg.sample_rate}:p=0",  # 1-second blocks
             "astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level"
             ":measure_overall=none",
-            "ametadata=mode=print:file=-",
+            "ametadata=mode=print",
         ]
     )
     return [
-        ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "error",
+        ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "info",
         *source.input_args(cfg), "-af", chain, "-f", "null", "-",
     ]  # fmt: skip
 
@@ -66,9 +72,9 @@ def parse(lines: list[str]) -> list[Reading]:
     """Parse ametadata print output into one Reading per block."""
     out: list[Reading] = []
     for line in lines:
-        if m := _FRAME.match(line):
+        if m := _FRAME.search(line):
             out.append(Reading(float(m.group(1))))
-        elif (m := _STAT.match(line)) and out:
+        elif (m := _STAT.search(line)) and out:
             ch, key, value = int(m.group(1)), m.group(2), _db(m.group(3))
             (out[-1].peak if key == "Peak_level" else out[-1].rms)[ch] = value
     return out
@@ -94,17 +100,33 @@ async def readings(cfg: Config, duration_s: float | None = None) -> AsyncIterato
         i = cmd.index("-i")
         cmd[i:i] = ["-t", f"{duration_s:g}"]
     proc = await asyncio.create_subprocess_exec(
-        *cmd, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE
+        *cmd,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
     )
-    assert proc.stdout is not None
+    assert proc.stderr is not None
     pending: list[str] = []
     try:
-        async for raw in proc.stdout:
+        while True:
+            try:
+                raw = await asyncio.wait_for(proc.stderr.readline(), NO_DATA_TIMEOUT_S)
+            except TimeoutError:
+                raise NoDataError(f"no data from the source for {NO_DATA_TIMEOUT_S:g} s") from None
+            if not raw:
+                break
             line = raw.decode(errors="replace").strip()
-            if _FRAME.match(line) and pending:
-                yield from_block(pending)
-                pending = []
-            pending.append(line)
+            if _FRAME.search(line):
+                if pending:
+                    yield from_block(pending)
+                pending = [line]
+            elif _STAT.search(line):
+                pending.append(line)
+                if len(pending) == 5:  # frame line + peak/RMS for both channels: complete
+                    yield from_block(pending)
+                    pending = []
+            elif _ERROR.search(line):
+                print(f"ffmpeg: {line}", file=sys.stderr, flush=True)
         if pending:
             yield from_block(pending)
     finally:
@@ -112,6 +134,10 @@ async def readings(cfg: Config, duration_s: float | None = None) -> AsyncIterato
             with contextlib.suppress(ProcessLookupError):
                 proc.terminate()
         await proc.wait()
+
+
+class NoDataError(RuntimeError):
+    pass
 
 
 def from_block(lines: list[str]) -> Reading:
@@ -130,11 +156,15 @@ async def run_levels(cfg: Config, duration_s: float | None = None) -> int:
     loudest = -math.inf
     over = count = 0
     with contextlib.suppress(asyncio.CancelledError):
-        async for r in readings(cfg, duration_s):
-            count += 1
-            loudest = max(loudest, r.max_peak)
-            over += r.clipping_risk
-            print(format_reading(r), flush=True)
+        try:
+            async for r in readings(cfg, duration_s):
+                count += 1
+                loudest = max(loudest, r.max_peak)
+                over += r.clipping_risk
+                print(format_reading(r), flush=True)
+        except NoDataError as e:
+            print(f"levels: {e}", flush=True)
+            return 1
     if count == 0:
         print("levels: no readings (see the ffmpeg error above; is the device right?)",
               flush=True)  # fmt: skip
