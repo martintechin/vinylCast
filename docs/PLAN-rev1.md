@@ -53,7 +53,7 @@ These are gates: the milestone that needs them does not start until they pass.
 | --- | --- | --- |
 | Under-voltage fixed (`get_throttled` stays `0x0` for 24 h with UFO202 attached) | Always-on device; under-voltage also causes USB capture loss | R0 |
 | Level measurement works on the Pi's ffmpeg 7 (spike, see R0) — **done: inline 100 ms** | Needle-drop detection and live levels depend on it | R1 |
-| Noise floor measured (stylus up, silent groove, run-out groove, music) | Sets the detection thresholds | R4 |
+| Noise floor measured (stylus up, silent groove, run-out groove, music) — **done: −40 dBFS** | Sets the detection thresholds | R4 |
 | 60-min soak (deferred M5) | Always-on playback must be stable | R5 |
 | Wi-Fi power save stays off after reboot | Always-on streaming on −73 dBm | R5 |
 
@@ -134,6 +134,21 @@ The first option that keeps the stream intact for 10 minutes with correct levels
 to ~0.1 s added latency. Speaker check: 3.4 min on HESTON 120 with `measure_levels` on, vinyl,
 0 restarts/stalls/drops, loudest peak −9.87 dBFS; accepted by Martin instead of 10 min (the
 24 h R5 test covers long runs). `measure_levels` and `peak_log_s = 10` are now the defaults.
+
+**Noise floor (Martin, 2026-11-08, 100 ms RMS blocks, UFO202, own preamp):**
+
+| Condition | RMS dBFS | Note |
+| --- | --- | --- |
+| Stylus up, platter stopped | −63.8 … −58.6 | |
+| Stylus up, platter spinning | −58.9 … −54.6 | |
+| Lead-in groove | −46.4 … (music started) | lead-in shorter than 10 s; max is music |
+| Run-out groove | −64.0 … −50.6 | also measured instead of a quiet passage: −55.3 … −49.6 |
+| Loud music | −30.5 … −27.6 | ordinary music in earlier runs: about −34 … −25 |
+
+**Threshold: −40 dBFS RMS on, −46 off** (6 dB hysteresis): music ≥ 6 dB above "on", groove noise
+never 1.5 s above it, run-out groove ≥ 3.6 dB below "off" so a non-returning tonearm still stops.
+Open: very quiet intros (< −40) start late; worn records with loud run-out crackle may not stop.
+Both are checked in R4's 10 needle-drop cycles; the threshold stays a setting.
 
 **Startup rebuffer (Martin, 2026-11-08):** HESTON 120 always goes BUFFERING ~0.5 s after the
 first PLAYING for ~0.5 s (MP3 and FLAC, with and without measurement). The soak criterion

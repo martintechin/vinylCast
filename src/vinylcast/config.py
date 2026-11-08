@@ -39,7 +39,9 @@ class Config:
     metrics_path: str = "./metrics.jsonl"  # strftime codes allowed, e.g. soak-%Y%m%d-%H%M.jsonl
     # Revision 1: auto-cast on needle drop (docs/PLAN-rev1.md)
     auto_cast: bool = True
-    detect_threshold_db: float = -50.0  # RMS dBFS; placeholder until the R0 noise-floor table
+    # RMS dBFS (R0 noise floor, Martin's Pi): music -34..-25, groove noise up to -46/-50,
+    # stylus up -64..-55. On at -40, off below -46 (6 dB hysteresis).
+    detect_threshold_db: float = -40.0
     detect_on_s: float = 1.5  # signal must last this long before casting
     stop_after_silence_s: float = 180.0  # silence before stopping (longer than a side flip)
     recast_max: int = 3  # automatic re-casts allowed per 10 minutes

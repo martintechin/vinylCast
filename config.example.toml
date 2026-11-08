@@ -55,9 +55,9 @@ metrics_path = "./metrics.jsonl"
 # Cast to the last-used speaker when music is detected at the input.
 auto_cast = true
 
-# RMS level (dBFS) above which the input counts as music. Placeholder until the R0
-# noise-floor measurement (python scripts/spike_measure.py --noise-floor).
-detect_threshold_db = -50.0
+# RMS level (dBFS) above which the input counts as music; "off" is 6 dB lower. From the R0
+# noise floor: music -34..-25, groove noise up to -46/-50, stylus up -64..-55 dBFS.
+detect_threshold_db = -40.0
 
 # Music must last this long before casting (ignores clicks and handling noise).
 detect_on_s = 1.5
