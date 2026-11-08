@@ -140,6 +140,9 @@ def test_is_busy() -> None:
     assert not is_busy("CC1AD845", url, url)  # already ours
     assert is_busy("CC1AD845", "http://other/x.mp3", url)
     assert is_busy("CC32E753", None, url)  # another app
+    # Regression (Pi): after a codec switch the speaker still shows our old MP3 URL.
+    assert not is_busy("CC1AD845", url, "http://192.168.1.102:8800/stream.flac")
+    assert is_busy("CC1AD845", "http://192.168.1.50:8800/stream.mp3", url)  # other server
 
 
 async def test_monitor_reports_end_once(tmp_path: Path) -> None:

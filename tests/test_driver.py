@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from conftest import wait_until
 
-from vinylcast.cast import CastError
+from vinylcast.cast import CastError, is_busy
 from vinylcast.config import Config, load_config
 from vinylcast.controller import State
 from vinylcast.detector import Level
@@ -22,9 +22,10 @@ class FakeSession:
     name: str
     on_end: Callable[[str], None]
     log: list[str]
-    busy: bool = False
+    busy: bool = False  # another app is running on the speaker
     found: bool = True
     latency: float | None = 1.0
+    content_id: str | None = None  # what the speaker's media receiver last loaded
 
     async def connect(self) -> None:
         self.log.append(f"connect {self.name}")
@@ -32,10 +33,14 @@ class FakeSession:
             raise CastError("not found")
 
     async def is_busy(self, our_url: str) -> bool:
-        return self.busy
+        # The real rule, applied to what this fake speaker is showing (a constant here hid
+        # the codec-switch bug Martin found on the Pi).
+        app = "CC32E753" if self.busy else ("CC1AD845" if self.content_id else None)
+        return is_busy(app, self.content_id, our_url)
 
     async def play(self, url: str, content_type: str) -> float | None:
         self.log.append(f"play {self.name} {url} {content_type}")
+        self.content_id = url
         return self.latency
 
     async def stop(self) -> None:

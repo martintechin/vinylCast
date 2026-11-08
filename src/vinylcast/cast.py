@@ -134,13 +134,21 @@ def classify_app_change(old_app: str | None, new_app: str | None) -> EndReason |
     return "cancelled" if new_app in IDLE_APPS else "taken_over"
 
 
+def is_ours(content_id: str, our_url: str) -> bool:
+    """Any of our stream URLs (same server, any codec) counts as ours. Bug found on the Pi:
+    after a codec switch the speaker still showed /stream.mp3 while we re-cast /stream.flac,
+    and comparing only the exact URL called our own old stream "someone else's media"."""
+    base = our_url.rsplit("/stream.", 1)[0] + "/stream."
+    return content_id.startswith(base)
+
+
 def is_busy(app_id: str | None, content_id: str | None, our_url: str) -> bool:
     """Would casting now interrupt someone? Free when nothing runs, or when the Default Media
-    Receiver is idle or already playing our own stream."""
+    Receiver is idle or playing one of our own streams."""
     if app_id in IDLE_APPS:
         return False
     if app_id == APP_MEDIA_RECEIVER:
-        return content_id not in (None, our_url)
+        return content_id is not None and not is_ours(content_id, our_url)
     return True
 
 
@@ -345,8 +353,10 @@ class CastSession:
         busy = await asyncio.to_thread(self._busy_blocking, our_url)
         if busy:
             assert self._cast is not None
+            media = self._cast.media_controller.status
             self._metrics.event("cast_busy", target=self.name, app_id=self._cast.app_id,
-                                app=self._cast.app_display_name)  # fmt: skip
+                                app=self._cast.app_display_name,
+                                content_id=media.content_id)  # fmt: skip
         return busy
 
     async def set_volume(self, level: float) -> float:
