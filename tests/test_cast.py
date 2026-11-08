@@ -97,3 +97,13 @@ def test_target_required(command: str, capsys: pytest.CaptureFixture[str]) -> No
 def test_cast_needs_running_server(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     rc = cli.main(["cast", "--to", "X", "--http-port", "1", "--metrics-path", str(tmp_path / "m")])
     assert rc == 1 and "no running server" in capsys.readouterr().err
+
+
+async def test_no_startup_event_without_play(tmp_path: Path) -> None:
+    """Regression (seen on Martin's Pi): `stop` connects to an already-playing target; that
+    PLAYING state must not be logged as a startup with latency null."""
+    path = tmp_path / "m.jsonl"
+    mon = StatusMonitor(Metrics(path), "Tvättstugan", asyncio.get_running_loop())
+    from_thread(mon.new_media_status, status("PLAYING"))
+    assert events(path, "cast_startup") == []
+    assert [e["player_state"] for e in events(path, "cast_state")] == ["PLAYING"]

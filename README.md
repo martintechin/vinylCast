@@ -3,7 +3,7 @@
 PoC: turntable → phono preamp → Behringer UFO202 → Raspberry Pi 3 → HTTP audio stream → Chromecast device or Cast group.
 See [PLAN.md](PLAN.md) for scope, milestones and acceptance criteria.
 
-Status: **M3 (Cast), code done, device acceptance pending.** `serve` streams MP3 or FLAC from the
+Status: **M3 (Cast) passed on a single device (Nest Mini); group checks open (no group yet).** `serve` streams MP3 or FLAC from the
 `tone`, `file` or `alsa` source; `devices`, `cast`, `stop` and `run` control Cast devices and groups.
 
 ## Quick start (no hardware)

@@ -83,6 +83,11 @@ cast.py wraps pychromecast 14.1.1, which is synchronous and threaded: blocking c
 serve + cast in one process and the soak-test entry point. Cast events: `cast_state` (every player
 state change, with `after_first_playing`), `cast_startup` (latency), `cast_connection`, errors.
 
+Observed receiver behaviour (Nest Mini, "Cast Lite", M3): GET only, HTTP/1.1 keep-alive, no Range,
+no HEAD, no Icy-MetaData; sends Accept-Encoding gzip/deflate, so never enable compression. Chunked
+endless MP3 and FLAC both play; startup ~3.5-3.9 s. A FLAC encoder restart (frame numbers reset)
+is bridged without BUFFERING/IDLE on a single device; groups not yet tested.
+
 Slow-client detection depends on server.py limiting per-connection socket buffering
 (SO_SNDBUF + transport high-water mark); without it Linux absorbs ~100 s of audio per
 stalled connection and the hub never sees the lag. Keep test producers real-time.

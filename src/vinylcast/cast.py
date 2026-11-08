@@ -110,8 +110,12 @@ class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorLi
             first_playing = status.player_state == "PLAYING" and not self.seen_playing
             if first_playing:
                 self.seen_playing = True
-                if self._play_sent is not None:
-                    self.startup_latency_s = round(time.monotonic() - self._play_sent, 3)
+            # Startup is only measured by the session that sent play_media; a session that
+            # connects to an already-playing target (`stop`) just logs the state.
+            startup = first_playing and self._play_sent is not None
+            if startup:
+                assert self._play_sent is not None
+                self.startup_latency_s = round(time.monotonic() - self._play_sent, 3)
             after_playing = self.seen_playing and not first_playing
         self._metrics.event(
             "cast_state",
@@ -122,10 +126,11 @@ class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorLi
             content_id=status.content_id,
             after_first_playing=after_playing,
         )
-        if first_playing:
+        if startup:
             self._metrics.event(
                 "cast_startup", target=self._target, latency_s=self.startup_latency_s
             )
+        if first_playing:
             self._loop.call_soon_threadsafe(self.playing.set)
 
     def load_media_failed(self, queue_item_id: int, error_code: int) -> None:
