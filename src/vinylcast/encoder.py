@@ -24,7 +24,9 @@ BACKOFF_S: tuple[float, ...] = (1, 2, 5, 10)
 STALL_TIMEOUT_S = 2.0
 STABLE_AFTER_S = 30.0  # a run this long resets the backoff sequence
 CHUNK_SIZE = 8192
-XRUN_MARKERS = ("xrun", "overrun", "underrun", "input/output error")
+# Only real capture dropouts. "Input/output error" is NOT one: ffmpeg also prints it when the
+# device cannot be opened (e.g. busy), which must not count as an xrun in the soak summary.
+XRUN_MARKERS = ("xrun", "overrun", "underrun")
 
 
 def codec_args(cfg: Config) -> list[str]:
@@ -121,6 +123,10 @@ class Encoder:
                 stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # Own process group: Ctrl-C / systemd's SIGINT go to VinylCast only, which
+                # then stops ffmpeg itself. Otherwise ffmpeg dies first and the intended
+                # shutdown is logged as encoder_exit + encoder_restart.
+                start_new_session=True,
             )
         except OSError as e:
             self._metrics.event("encoder_spawn_failed", error=str(e))

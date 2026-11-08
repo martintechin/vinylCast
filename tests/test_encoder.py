@@ -104,3 +104,31 @@ async def test_missing_binary_backs_off(tmp_path: Path) -> None:
     async with running(enc):
         await wait_until(lambda: enc.restarts >= 2)
     assert events(path, "encoder_spawn_failed")
+
+
+@requires_ffmpeg
+async def test_ffmpeg_in_own_process_group() -> None:
+    """Regression (Martin's Pi): Ctrl-C / systemd SIGINT hit ffmpeg too, so every clean
+    shutdown was logged as encoder_exit + encoder_restart. ffmpeg must not share our
+    process group."""
+    sink = Collector()
+    enc = Encoder(build_command(load_config(overrides={"source": "tone"})), sink, Metrics(None))
+    async with running(enc):
+        await wait_until(lambda: enc.pid is not None)
+        assert enc.pid is not None
+        assert os.getpgid(enc.pid) != os.getpgid(0)
+
+
+async def test_device_busy_is_not_an_xrun(tmp_path: Path) -> None:
+    path = tmp_path / "m.jsonl"
+    lines = [
+        "[alsa @ 0x1] cannot open audio device hw:CARD=CODEC,DEV=0 (Device or resource busy)",
+        "[in#0 @ 0x2] Error opening input: Input/output error",
+        "[alsa @ 0x1] ALSA buffer xrun.",
+    ]
+    script = "; ".join(f"echo '{line}' >&2" for line in lines) + "; exit 1"
+    enc = Encoder(["sh", "-c", script], Collector(), Metrics(path), backoff_s=(10,))
+    async with running(enc):
+        await wait_until(lambda: enc.restarts >= 1)
+    assert [e["line"] for e in events(path, "ffmpeg_xrun")] == [lines[2]]
+    assert len(events(path, "ffmpeg_warning")) == 2
