@@ -58,6 +58,47 @@ class Target:
         return "group" if self.cast_type == CAST_TYPE_GROUP else "device"
 
 
+def _to_target(i: Any) -> Target:
+    return Target(
+        name=i.friendly_name or "?",
+        model=i.model_name or "?",
+        cast_type=i.cast_type or "?",
+        host=i.host,
+        port=i.port,
+        uuid=str(i.uuid),
+    )
+
+
+def _sorted(targets: list[Target]) -> list[Target]:
+    return sorted(targets, key=lambda t: (t.kind, t.name.lower()))
+
+
+class DeviceBrowser:
+    """Continuous discovery for the web UI: the device list stays current while the daemon
+    runs (devices and groups appear/disappear as mDNS reports them)."""
+
+    def __init__(self) -> None:
+        self._browser: CastBrowser | None = None
+
+    def start(self) -> None:
+        self._browser = CastBrowser(SimpleCastListener(), pychromecast.discovery.create_zeroconf())
+        self._browser.start_discovery()  # starts its own threads, returns at once
+
+    def devices(self) -> list[Target]:
+        if self._browser is None:
+            return []
+        lock = getattr(self._browser, "_services_lock", None)  # guards .devices (14.1.1)
+        with lock if lock is not None else contextlib.nullcontext():
+            infos = list(self._browser.devices.values())
+        return _sorted([_to_target(i) for i in infos])
+
+    def stop(self) -> None:
+        if self._browser is not None:
+            with contextlib.suppress(Exception):
+                self._browser.stop_discovery()
+            self._browser = None
+
+
 def discover(timeout_s: float = DISCOVERY_TIMEOUT_S) -> list[Target]:
     """Browse mDNS for `timeout_s` and return every Cast device and group seen (blocking)."""
     browser = CastBrowser(SimpleCastListener(), pychromecast.discovery.create_zeroconf())
@@ -67,20 +108,7 @@ def discover(timeout_s: float = DISCOVERY_TIMEOUT_S) -> list[Target]:
         infos = list(browser.devices.values())
     finally:
         browser.stop_discovery()
-    return sorted(
-        (
-            Target(
-                name=i.friendly_name or "?",
-                model=i.model_name or "?",
-                cast_type=i.cast_type or "?",
-                host=i.host,
-                port=i.port,
-                uuid=str(i.uuid),
-            )
-            for i in infos
-        ),
-        key=lambda t: (t.kind, t.name.lower()),
-    )
+    return _sorted([_to_target(i) for i in infos])
 
 
 # Why playback ended, in the controller's terms (controller.CastEnd).

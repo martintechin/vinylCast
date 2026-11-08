@@ -88,6 +88,8 @@ class StreamServer:
 
     @web.middleware
     async def _log_request(self, request: web.Request, handler: Handler) -> web.StreamResponse:
+        if request.method in ("GET", "HEAD") and request.path.startswith("/api/"):
+            return await handler(request)  # UI polling/SSE: not receiver behaviour, not logged
         self._metrics.event(
             "http_request",
             method=request.method,

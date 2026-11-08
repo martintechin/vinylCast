@@ -13,6 +13,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
@@ -28,10 +29,16 @@ class Metrics:
         self.path = Path(time.strftime(str(path))) if path is not None else None
         self._fh = self.path.open("a", buffering=1, encoding="utf-8") if self.path else None
         self._lock = threading.Lock()  # pychromecast callbacks log from their own threads
+        # In memory for the web UI's diagnostics: recent events, latest record per kind.
+        self.recent: deque[dict[str, Any]] = deque(maxlen=200)
+        self.latest: dict[str, dict[str, Any]] = {}
 
     def _write(self, record: dict[str, Any]) -> None:
         line = json.dumps(record, separators=(",", ":"), default=str) + "\n"
         with self._lock:
+            if record.get("kind") == "event":
+                self.recent.append(record)
+            self.latest[str(record.get("kind"))] = record
             if self._fh is not None:
                 self._fh.write(line)
 

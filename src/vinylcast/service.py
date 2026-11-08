@@ -223,10 +223,11 @@ async def run_daemon(toml_path: Any, overrides: dict[str, Any]) -> int:
     (state.json) override the TOML; command-line flags override both."""
     from dataclasses import replace
 
-    from vinylcast.cast import CastSession
+    from vinylcast.cast import CastSession, DeviceBrowser
     from vinylcast.config import ConfigError, load_config
     from vinylcast.driver import Driver
     from vinylcast.state import StateStore
+    from vinylcast.web import WebApi
 
     base = load_config(toml_path, overrides)
     store = StateStore(base.state_path)
@@ -240,17 +241,21 @@ async def run_daemon(toml_path: Any, overrides: dict[str, Any]) -> int:
     service = Service(cfg)
     service.metrics.event("service_start", config=cfg.__dict__, mode="daemon",
                           last_target=state.last_target)  # fmt: skip
-    if not await _start_or_report(service):
-        return 1
     driver = Driver(
         service, store, state, service.metrics,
         lambda name, on_end: CastSession(name, service.metrics, on_end),
         toml_path=toml_path, cli_overrides={**overrides, "measure_levels": True},
     )  # fmt: skip
     service.level_listeners.append(driver.on_level)
+    browser = DeviceBrowser()
+    WebApi(service, driver, browser.devices).install(service.server.app)  # before start
+    if not await _start_or_report(service):
+        return 1
+    browser.start()
     target = driver.controller.target
     print(f"Listening on {cfg.source}; on needle drop: cast to {target or '(no speaker yet)'} "
           f"at {stream_url(cfg)}  (Ctrl-C to stop)", flush=True)  # fmt: skip
+    print(f"Web API: http://{stream_url(cfg).split('/')[2]}/api/status", flush=True)
     task = asyncio.create_task(driver.run())
     try:
         await _wait_for_signal()
@@ -260,5 +265,6 @@ async def run_daemon(toml_path: Any, overrides: dict[str, Any]) -> int:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        await asyncio.to_thread(browser.stop)
         await service.stop()
     return 0
