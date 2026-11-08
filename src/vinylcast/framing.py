@@ -235,6 +235,12 @@ class FlacFrameHeader:
     block_size: int
     sample_rate: int  # 0 = take it from STREAMINFO
     header_len: int
+    number: int  # frame number (fixed block size) or first-sample number (variable)
+    variable: bool  # variable block-size stream: `number` counts samples
+
+    @property
+    def next_number(self) -> int:
+        return self.number + (self.block_size if self.variable else 1)
 
 
 def parse_flac_frame_header(b: bytes | memoryview, pos: int = 0) -> FlacFrameHeader | None:
@@ -268,9 +274,11 @@ def parse_flac_frame_header(b: bytes | memoryview, pos: int = 0) -> FlacFrameHea
         return None
     if n < i + 1 + extra:
         return None
+    number = first & (0x7F >> extra) if extra else first
     for k in range(1, extra + 1):
         if b[i + k] & 0xC0 != 0x80:
             return None
+        number = (number << 6) | (b[i + k] & 0x3F)
     i += 1 + extra
     if bs_code == 6:
         if n < i + 1:
@@ -305,16 +313,19 @@ def parse_flac_frame_header(b: bytes | memoryview, pos: int = 0) -> FlacFrameHea
         i += 2
     if n < i + 1 or crc8(b[pos:i]) != b[i]:
         return None
-    return FlacFrameHeader(block_size, rate, i + 1 - pos)
+    return FlacFrameHeader(block_size, rate, i + 1 - pos, number, bool(b[pos + 1] & 0x1))
 
 
 def split_flac(buf: bytes, synced: bool, stream_rate: int) -> tuple[list[Frame], int, bool, int]:
     """Split FLAC frame data (after the stream header) into whole frames.
 
-    A frame has no length field: it ends where the next frame starts. A boundary is a valid
-    frame header (sync + fields + CRC-8) at which the preceding bytes also pass the frame's
-    CRC-16, so audio data that happens to look like a header is not mistaken for one.
-    The last frame in `buf` is held back until the next header arrives.
+    A frame has no length field: it ends where the next frame starts. A boundary candidate
+    is a valid frame header (sync + fields + CRC-8). It is accepted if its frame number
+    continues the current frame's (n + 1, or + block size for variable block sizes), which
+    costs nothing. Otherwise (acquiring sync, or a discontinuity) the preceding bytes must
+    pass the frame CRC-16. The CRC-16 is pure Python (~1.4 us/byte on a Pi 3), so it is
+    kept off the steady-state path. The last frame in `buf` is held back until the next
+    header arrives.
     Returns (frames, consumed, synced, skipped).
     """
     frames: list[Frame] = []
@@ -336,11 +347,16 @@ def split_flac(buf: bytes, synced: bool, stream_rate: int) -> tuple[list[Frame],
             nxt = buf.find(b"\xff", nxt)
             if nxt < 0 or n - nxt < 24:
                 break
-            if (buf[nxt + 1] & 0xFE) == 0xF8 and parse_flac_frame_header(buf, nxt) is not None:
-                body = memoryview(buf)[pos:nxt]
-                if crc16(body[:-2]) == int.from_bytes(body[-2:], "big"):
-                    found = nxt
-                    break
+            if (buf[nxt + 1] & 0xFE) == 0xF8:
+                cand = parse_flac_frame_header(buf, nxt)
+                if cand is not None:
+                    if synced and cand.number == hdr.next_number:
+                        found = nxt
+                        break
+                    body = memoryview(buf)[pos:nxt]
+                    if crc16(body[:-2]) == int.from_bytes(body[-2:], "big"):
+                        found = nxt
+                        break
             nxt += 1
         if found is None:
             break

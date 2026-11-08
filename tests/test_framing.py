@@ -165,6 +165,7 @@ def test_flac_frame_header_crc_is_checked() -> None:
     assert hlen is not None
     h = parse_flac_frame_header(FLAC_44, hlen)
     assert h is not None and h.block_size == 4608 and h.sample_rate == 44100
+    assert (h.number, h.variable, h.next_number) == (0, False, 1)
     broken = bytearray(FLAC_44[hlen : hlen + 32])
     broken[h.header_len - 1] ^= 0x01  # flip a CRC-8 bit
     assert parse_flac_frame_header(bytes(broken)) is None
@@ -229,3 +230,53 @@ def test_flac_header_recapture_after_reset() -> None:
     framer.feed(FLAC_48)
     assert calls == [(True, False), (False, True), (False, False)]
     assert framer.info is not None and framer.info.sample_rate == 48000
+
+
+def test_flac_frame_numbers_parsed_in_sequence() -> None:
+    hlen = flac_header_len(FLAC_44)
+    assert hlen is not None
+    frames = FlacFramer().feed(FLAC_44)
+    numbers = []
+    for f in frames:
+        h = parse_flac_frame_header(f.data)
+        assert h is not None
+        numbers.append(h.number)
+    assert numbers == list(range(len(frames)))
+
+
+def test_flac_frame_number_multibyte() -> None:
+    # Frame number 1000 needs the 2-byte UTF-8 form: 0xCF 0xA8.
+    hdr = bytearray(b"\xff\xf8\x59\x18\xcf\xa8")
+    hdr.append(crc8(hdr))
+    h = parse_flac_frame_header(bytes(hdr))
+    assert h is not None and h.number == 1000 and h.header_len == 7
+
+
+def test_flac_steady_state_skips_crc16(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Once synced, boundaries are confirmed by frame-number continuity: CRC-16 runs only
+    for the first frame (acquiring sync), not per frame."""
+    import vinylcast.framing as framing
+
+    calls = 0
+    real = framing.crc16
+
+    def counting(data: bytes | memoryview) -> int:
+        nonlocal calls
+        calls += 1
+        return real(data)
+
+    monkeypatch.setattr(framing, "crc16", counting)
+    frames = FlacFramer().feed(FLAC_44)
+    assert len(frames) > 5 and calls == 1
+
+
+def test_flac_number_gap_falls_back_to_crc16() -> None:
+    """A discontinuity in frame numbers (e.g. a dropped frame) is still split correctly."""
+    reference = FlacFramer().feed(FLAC_44)
+    hlen = flac_header_len(FLAC_44)
+    assert hlen is not None
+    spliced = FLAC_44[:hlen] + b"".join(f.data for i, f in enumerate(reference) if i != 3)
+    # Append the next header so the last frame is released.
+    spliced += FLAC_44[hlen + sum(len(f.data) for f in reference) :]
+    frames = FlacFramer().feed(spliced)
+    assert frames == [f for i, f in enumerate(reference) if i != 3]
