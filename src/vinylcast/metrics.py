@@ -169,6 +169,22 @@ def parse_throttled(text: str | None) -> int | None:
         return None
 
 
+_THROTTLE_BITS = {
+    0: "under-voltage",
+    1: "arm-frequency-capped",
+    2: "throttled",
+    3: "soft-temperature-limit",
+}
+
+
+def decode_throttled(value: int) -> dict[str, list[str]]:
+    """vcgencmd get_throttled bits: 0-3 = happening now, 16-19 = has occurred since boot."""
+    return {
+        "now": [n for b, n in _THROTTLE_BITS.items() if value & (1 << b)],
+        "since_boot": [n for b, n in _THROTTLE_BITS.items() if value & (1 << (b + 16))],
+    }
+
+
 def parse_iw_link(text: str | None) -> dict[str, Any] | None:
     """`iw dev <if> link` -> {connected, freq_mhz, signal_dbm, tx_mbit, rx_mbit}."""
     if text is None:
@@ -217,9 +233,14 @@ class PiHealth:
         }
 
     async def run(self) -> None:
+        last: str | None = "0x0"
         while True:
             health = await self.collect()
             self._metrics.write_record("health", **health)
-            if health["throttled"] not in (None, "0x0"):
-                self._metrics.event("pi_throttled", value=health["throttled"])
+            value = health["throttled"]
+            # The "has occurred" bits stay set until reboot: log on change, not every minute.
+            if value is not None and value != last and value != "0x0":
+                self._metrics.event("pi_throttled", value=value, **decode_throttled(int(value, 16)))
+            if value is not None:
+                last = value
             await asyncio.sleep(self._interval_s)

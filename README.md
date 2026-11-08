@@ -79,6 +79,8 @@ Precedence: built-in defaults < TOML < flags.
 | Cast group checks (M3, M6) | No speaker group exists yet | Create a group in Google Home, rerun `devices` and `run --to <group>` |
 | Loudest-passage level check (M4) | No loud record at hand; loudest seen -10.3 dBFS | `vinylcast levels` on a loud record (service stopped) |
 | Peak logging (`peak_log_s`) | Silences the stream on the Pi's ffmpeg 7 (both variants); off by default | Needs ffmpeg 7's error lines from a failed run |
+| Pi under-voltage | `get_throttled` 0x50000 on 2026-11-08: under-voltage and throttling have occurred since boot (not at that moment) | Official 5.1 V / 2.5 A supply and cable; after a reboot `vcgencmd get_throttled` must stay 0x0 (`journalctl -k \| grep -i voltage` shows when) |
+| Early BUFFERING on HESTON 120 (FLAC) | 0.5 s BUFFERING 0.5 s after first PLAYING; receiver starts with a tiny buffer (no history for new clients) | Longer run: does it recur after startup? |
 | Wi-Fi power save off after reboot | Set via nmcli on the netplan connection; persistence unverified | `iw dev wlan0 get power_save` after a reboot |
 
 ## Codec decision (M6)
@@ -96,7 +98,7 @@ Evidence so far (short runs, no soak):
 | MP3 320k | Tvättstugan (Nest Mini) | plays (tone, vinyl) | not measured | 2.5-3.6 s | M3/M4; service start/stop clean |
 | MP3 320k | HESTON 120 | plays (vinyl) | not measured | not measured | Cast Lite, same HTTP behaviour |
 | FLAC | Tvättstugan (Nest Mini) | plays (tone) | not measured | 3.9 s | survives encoder restart (frame numbers reset) |
-| FLAC | HESTON 120 | not tested | | | |
+| FLAC | HESTON 120 | plays (vinyl) | not measured | 1.37 s | one 0.5 s BUFFERING right after the first PLAYING; recurrence unknown |
 | either | Cast group | not tested | | | no group yet |
 
 Framing CPU on the Pi 3 (bench_framing.py, 20 s noise): MP3 0.13 %, FLAC 0.25 % of one core.

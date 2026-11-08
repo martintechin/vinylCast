@@ -78,3 +78,35 @@ def test_last_run_selected_by_default(tmp_path: Path) -> None:
     path = tmp_path / "m.jsonl"
     path.write_text(PI_RUN.strip() + "\n" + PI_RUN.strip() + "\n")
     assert main([str(path), "--no-kernel-log", "--min-minutes", "1"]) == 0
+
+
+def test_decode_throttled() -> None:
+    from vinylcast.metrics import decode_throttled
+
+    # Martin's Pi, 2026-11-08: 0x50000
+    assert decode_throttled(0x50000) == {"now": [], "since_boot": ["under-voltage", "throttled"]}
+    assert decode_throttled(0x50005)["now"] == ["under-voltage", "throttled"]
+    assert decode_throttled(0) == {"now": [], "since_boot": []}
+
+
+async def test_throttled_event_only_on_change(tmp_path: Path, monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    import asyncio
+
+    from conftest import events
+
+    from vinylcast.metrics import Metrics, PiHealth
+
+    values = iter(["0x0", "0x50000", "0x50000", "0x50005", "0x50005"])
+    health = PiHealth(Metrics(tmp_path / "m.jsonl"), interval_s=0)
+
+    async def fake_collect() -> dict:
+        return {"throttled": next(values), "net_iface": None, "wifi": None}
+
+    monkeypatch.setattr(health, "collect", fake_collect)
+    task = asyncio.create_task(health.run())
+    for _ in range(50):
+        await asyncio.sleep(0)
+    task.cancel()
+    evs = events(tmp_path / "m.jsonl", "pi_throttled")
+    assert [e["value"] for e in evs] == ["0x50000", "0x50005"]
+    assert evs[0]["since_boot"] == ["under-voltage", "throttled"] and evs[0]["now"] == []
