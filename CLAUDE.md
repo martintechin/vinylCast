@@ -32,6 +32,10 @@ and Wi-Fi power-save persistence). Codec decision (M6, Martin): keep BOTH codecs
 not remove either path. Targets in use: "HESTON 120" (192.168.1.65) and
 "Tvättstugan" (Nest Mini, 192.168.1.124); both "Cast Lite" receivers.
 
+Next: revision 1 per `docs/PLAN-rev1.md` (auto-cast on needle drop, phone web UI), starting
+with R0 (power fix, ffmpeg 7 measurement spike, noise floor). Decided: 180 s silence timeout,
+English UI, no auth in rev 1 (device-code login later).
+
 ## Working rules
 - Build one milestone at a time (M0 → M6). After each: run its checks, report commands and output, stop and wait for approval.
 - One commit per milestone; acceptance evidence (commands + output) goes in the commit body.

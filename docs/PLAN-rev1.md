@@ -1,4 +1,4 @@
-# VinylCast Revision 1 – Build Plan (DRAFT for approval)
+# VinylCast Revision 1 – Build Plan
 
 Nov 8, 2026 · draft by Claude Code for @Martin · builds on the PoC (`PLAN.md`, status in
 `docs/STATUS.md`)
@@ -33,6 +33,13 @@ In scope:
 - A single-page phone UI (plain HTML/CSS/JS, no build step, no new dependency)
 - Recovery: speaker reboot, Wi-Fi drop, receiver error, encoder restart → back to playing
 - Start at boot (systemd `enable`)
+
+Decided by Martin (2026-11-08, open decisions):
+
+- `stop_after_silence_s` default **180 s**.
+- UI language **English**.
+- **No authentication** in revision 1 (LAN only). A login using device codes, which Martin
+  already has solutions for, is a candidate for a later revision.
 
 Not in revision 1 (do not build): authentication (LAN only, as in the PoC), Home Assistant,
 Wi-Fi provisioning, phono stage, enclosure/PCB, custom Cast receiver app, latency reduction
@@ -210,11 +217,11 @@ Pi with the commands given per milestone. The UI is checked by hand on a phone.
 | Level measurement on ffmpeg 7 | Two variants already broke the stream; detection depends on it | R0 spike; fallback needs Martin's approval (Python-side RMS) |
 | False starts (rumble, handling, preamp thump) | An appliance that starts by itself is worse than none | R0 noise floor, `detect_on_s`, R4 2 h idle test |
 | Taking over a busy speaker | Would interrupt someone else's music | Rule: never take over; R4 test |
-| Unauthenticated settings on the LAN | Anyone on Wi-Fi can change or stop it | Accepted for rev 1 (as in PoC); revisit before any release |
+| Unauthenticated settings on the LAN | Anyone on Wi-Fi can change or stop it | Accepted for rev 1 (Martin); device-code login in a later revision |
 | Always-on load on a marginal power supply | Under-voltage seen in PoC | R0 gate |
 | Weak Wi-Fi (−73 dBm, 2.4 GHz) | Dropouts during long listening | R5 24 h test; fix by AP placement, not code |
-| Default `stop_after_silence_s` | Too short stops on side flips, too long keeps the speaker busy | Martin; 180 s proposed |
-| UI language | English or Swedish | Martin |
+| Default `stop_after_silence_s` | Too short stops on side flips, too long keeps the speaker busy | Decided: 180 s |
+| UI language | English or Swedish | Decided: English |
 
 ## Instructions for Claude Code
 
