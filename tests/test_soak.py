@@ -65,7 +65,7 @@ def test_failures_are_detected() -> None:
         "played >= 60 min",
         "0 encoder restarts",
         "0 client drops",
-        "0 BUFFERING after first PLAYING",
+        "0 BUFFERING after first PLAYING (+5 s grace)",
         "get_throttled always 0",
     }
     assert s.counts["ffmpeg_xruns"] == 1
@@ -110,3 +110,21 @@ async def test_throttled_event_only_on_change(tmp_path: Path, monkeypatch) -> No
     evs = events(tmp_path / "m.jsonl", "pi_throttled")
     assert [e["value"] for e in evs] == ["0x50000", "0x50005"]
     assert evs[0]["since_boot"] == ["under-voltage", "throttled"] and evs[0]["now"] == []
+
+
+def test_startup_rebuffer_within_grace_does_not_fail() -> None:
+    """Martin's r0-speaker.jsonl: PLAYING at .389, BUFFERING at .875 (+0.49 s), PLAYING at
+    803.378 -> counted as startup rebuffer, not a failure. Later BUFFERING still fails."""
+    recs = records(PI_RUN)
+    first = 1794144795.666
+    blip = [{"ts": first + 0.49, "kind": "event", "event": "cast_state",
+             "player_state": "BUFFERING", "after_first_playing": True},
+            {"ts": first + 0.99, "kind": "event", "event": "cast_state",
+             "player_state": "PLAYING", "after_first_playing": True}]  # fmt: skip
+    s = summarize(split_runs(sorted(recs + blip, key=lambda r: r["ts"]))[0], min_minutes=1.0)
+    assert s.counts["startup_rebuffers"] == 1 and s.counts["buffering_after_playing"] == 0
+    assert s.passed
+    late = [{"ts": first + 30, "kind": "event", "event": "cast_state",
+             "player_state": "BUFFERING", "after_first_playing": True}]  # fmt: skip
+    s = summarize(split_runs(sorted(recs + blip + late, key=lambda r: r["ts"]))[0], 1.0)
+    assert s.counts["buffering_after_playing"] == 1 and not s.passed

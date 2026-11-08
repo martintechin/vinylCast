@@ -52,7 +52,7 @@ These are gates: the milestone that needs them does not start until they pass.
 | Item | Why it matters now | Gate for |
 | --- | --- | --- |
 | Under-voltage fixed (`get_throttled` stays `0x0` for 24 h with UFO202 attached) | Always-on device; under-voltage also causes USB capture loss | R0 |
-| Level measurement works on the Pi's ffmpeg 7 (spike, see R0) | Needle-drop detection and live levels depend on it | R1 |
+| Level measurement works on the Pi's ffmpeg 7 (spike, see R0) — **done: inline 100 ms** | Needle-drop detection and live levels depend on it | R1 |
 | Noise floor measured (stylus up, silent groove, run-out groove, music) | Sets the detection thresholds | R4 |
 | 60-min soak (deferred M5) | Always-on playback must be stable | R5 |
 | Wi-Fi power save stays off after reboot | Always-on streaming on −73 dBm | R5 |
@@ -131,7 +131,14 @@ The first option that keeps the stream intact for 10 minutes with correct levels
 | control: asplit + 10 s blocks (PoC peak logging) | **stalled** ("buffers queued") | 0.1 | 245.7 % |
 
 **Decision: A2** (inline, 100 ms). No Python-side fallback needed. Cost: +1.5 % CPU and up
-to ~0.1 s added latency. Remaining R0 check: 10 min on a speaker with `measure_levels` on.
+to ~0.1 s added latency. Speaker check: 3.4 min on HESTON 120 with `measure_levels` on, vinyl,
+0 restarts/stalls/drops, loudest peak −9.87 dBFS; accepted by Martin instead of 10 min (the
+24 h R5 test covers long runs). `measure_levels` and `peak_log_s = 10` are now the defaults.
+
+**Startup rebuffer (Martin, 2026-11-08):** HESTON 120 always goes BUFFERING ~0.5 s after the
+first PLAYING for ~0.5 s (MP3 and FLAC, with and without measurement). The soak criterion
+becomes "0 BUFFERING after first PLAYING, with a 5 s startup grace"; rebuffers inside the
+grace are reported as `startup_rebuffers`.
 
 ### detector.py
 

@@ -46,6 +46,7 @@ def test_level_measurement_is_inline_100ms() -> None:
     assert cmd.index("-af") < cmd.index("-c:a")
 
 
-def test_no_measurement_by_default() -> None:
-    cmd = build_command(load_config(overrides={"source": "tone"}))
+def test_measurement_on_by_default_and_can_be_disabled() -> None:
+    assert "-af" in build_command(load_config(overrides={"source": "tone"}))
+    cmd = build_command(load_config(overrides={"source": "tone", "measure_levels": False}))
     assert "-af" not in cmd and "-filter_complex" not in cmd and cmd[-1] == "pipe:1"

@@ -37,12 +37,12 @@ advertise_ip = "auto"
 client_max_buffer_s = 10
 
 # Measure input levels inside the encoder's ffmpeg (100 ms blocks, ~+1.5 % CPU on a Pi 3).
-# Needed for needle-drop detection and peak logging. Off until verified on a speaker.
-measure_levels = false
+# Needed for needle-drop detection and peak logging. Verified on the Pi (R0).
+measure_levels = true
 
 # Log the input peak every N seconds (needs measure_levels; 0 = off). The soak summary
 # reports the loudest peak.
-peak_log_s = 0
+peak_log_s = 10
 
 # JSONL metrics log. Use one file per soak-test run; strftime codes are expanded when the
 # file is opened, e.g. "./soak-%Y%m%d-%H%M.jsonl".

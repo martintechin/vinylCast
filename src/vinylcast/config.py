@@ -32,10 +32,10 @@ class Config:
     cast_target: str | None = None
     client_max_buffer_s: float = 10.0
     # Level measurement inline in the encoder's ffmpeg (100 ms blocks, R0 variant A2: passed
-    # 60 s on the Pi's ffmpeg 7, +1.5 % CPU). Off until the 10-min speaker check passes.
-    measure_levels: bool = False
+    # the spike and a 3.4 min speaker run on the Pi's ffmpeg 7, +1.5 % CPU). Default on (R0).
+    measure_levels: bool = True
     # Log the input peak every N s (needs measure_levels); 0 = off.
-    peak_log_s: float = 0.0
+    peak_log_s: float = 10.0
     metrics_path: str = "./metrics.jsonl"  # strftime codes allowed, e.g. soak-%Y%m%d-%H%M.jsonl
     # Revision 1: auto-cast on needle drop (docs/PLAN-rev1.md)
     auto_cast: bool = True

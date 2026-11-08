@@ -20,6 +20,8 @@ from typing import Any
 
 from vinylcast.metrics import read_records
 
+STARTUP_GRACE_S = 5.0
+
 KERNEL_PATTERNS = {
     "usb_data_lost": re.compile(r"Data may have been lost"),
     "usb_disconnect": re.compile(r"usb \S+: USB disconnect"),
@@ -118,6 +120,13 @@ def summarize(
     ]
     startup = [e.get("latency_s") for e in events if e["event"] == "cast_startup"]
     after = [e for e in window if e["event"] == "cast_state" and e.get("after_first_playing")]
+    first_play = min(playing, default=None)
+    # Martin, 2026-11-08: HESTON 120 always rebuffers once ~0.5 s after starting. A BUFFERING
+    # within STARTUP_GRACE_S of the first PLAYING is reported separately and does not fail.
+    buffering = [e for e in after if e.get("player_state") == "BUFFERING"]
+    startup_rebuffers = sum(
+        1 for e in buffering if first_play is not None and e["ts"] - first_play <= STARTUP_GRACE_S
+    )
     counts = {
         "encoder_restarts": count("encoder_restart"),
         "encoder_stalls": count("encoder_stall"),
@@ -127,7 +136,8 @@ def summarize(
             1 for e in window if e["event"] == "client_disconnect" and e.get("reason") != "shutdown"
         ),
         "slow_clients": count("client_slow"),
-        "buffering_after_playing": sum(1 for e in after if e.get("player_state") == "BUFFERING"),
+        "buffering_after_playing": len(buffering) - startup_rebuffers,
+        "startup_rebuffers": startup_rebuffers,
         "idle_after_playing": sum(1 for e in after if e.get("player_state") == "IDLE"),
         "cast_connection_problems": sum(
             1
@@ -176,7 +186,7 @@ def summarize(
         }
 
     s = Summary(
-        config=config, start=start, end=end, first_playing=min(playing, default=None),
+        config=config, start=start, end=end, first_playing=first_play,
         stop_marker=stop_marker, startup_latency_s=startup[0] if startup else None,
         counts=counts, cpu=cpu, rss_max_mb=rss, wifi=wifi, throttled_values=throttled,
         peak=peak, kernel=kernel,
@@ -186,7 +196,9 @@ def summarize(
         f"played >= {min_minutes:g} min": s.playing_s >= min_minutes * 60,
         "0 encoder restarts": counts["encoder_restarts"] == 0,
         "0 client drops": counts["client_drops"] == 0,
-        "0 BUFFERING after first PLAYING": counts["buffering_after_playing"] == 0,
+        f"0 BUFFERING after first PLAYING (+{STARTUP_GRACE_S:g} s grace)": (
+            counts["buffering_after_playing"] == 0
+        ),
         "get_throttled always 0": not throttled and counts["throttled_events"] == 0,
     }
     return s
