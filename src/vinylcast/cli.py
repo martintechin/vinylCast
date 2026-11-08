@@ -32,6 +32,12 @@ def _common_parser() -> argparse.ArgumentParser:
     g.add_argument("--advertise-ip", help='IP for the stream URL, or "auto"')
     g.add_argument("--client-max-buffer-s", type=float)
     g.add_argument("--peak-log-s", type=float, help="log input peak every N s (0 = off)")
+    g.add_argument("--auto-cast", action=argparse.BooleanOptionalAction)
+    g.add_argument("--detect-threshold-db", type=float)
+    g.add_argument("--detect-on-s", type=float)
+    g.add_argument("--stop-after-silence-s", type=float)
+    g.add_argument("--recast-max", type=int)
+    g.add_argument("--state-path")
     g.add_argument("--metrics-path", help="JSONL log; strftime codes allowed (%%Y%%m%%d-%%H%%M)")
     return p
 
@@ -49,6 +55,12 @@ CONFIG_KEYS = (
     "client_max_buffer_s",
     "peak_log_s",
     "metrics_path",
+    "auto_cast",
+    "detect_threshold_db",
+    "detect_on_s",
+    "stop_after_silence_s",
+    "recast_max",
+    "state_path",
 )
 
 

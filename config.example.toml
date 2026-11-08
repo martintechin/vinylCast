@@ -43,3 +43,26 @@ peak_log_s = 0
 # JSONL metrics log. Use one file per soak-test run; strftime codes are expanded when the
 # file is opened, e.g. "./soak-%Y%m%d-%H%M.jsonl".
 metrics_path = "./metrics.jsonl"
+
+# --- Revision 1: auto-cast on needle drop (docs/PLAN-rev1.md) ---
+# The web UI may change auto_cast, the detection settings, codec and mp3_bitrate; its changes
+# are stored in state.json and override this file (command-line flags override both).
+
+# Cast to the last-used speaker when music is detected at the input.
+auto_cast = true
+
+# RMS level (dBFS) above which the input counts as music. Placeholder until the R0
+# noise-floor measurement (python scripts/spike_measure.py --noise-floor).
+detect_threshold_db = -50.0
+
+# Music must last this long before casting (ignores clicks and handling noise).
+detect_on_s = 1.5
+
+# Silence this long stops playback (must be longer than a side flip).
+stop_after_silence_s = 180.0
+
+# Automatic re-casts allowed per 10 minutes after receiver errors.
+recast_max = 3
+
+# Persistent state: last speaker and settings changed in the web UI.
+state_path = "./state.json"

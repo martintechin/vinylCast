@@ -1,4 +1,4 @@
-"""Configuration: defaults < TOML file < CLI overrides."""
+"""Configuration: defaults < TOML file < UI settings (state.json) < CLI overrides."""
 
 from __future__ import annotations
 
@@ -35,6 +35,13 @@ class Config:
     # Pi's ffmpeg 7 both variants tried so far silenced the stream (works on ffmpeg 6.1).
     peak_log_s: float = 0.0
     metrics_path: str = "./metrics.jsonl"  # strftime codes allowed, e.g. soak-%Y%m%d-%H%M.jsonl
+    # Revision 1: auto-cast on needle drop (docs/PLAN-rev1.md)
+    auto_cast: bool = True
+    detect_threshold_db: float = -50.0  # RMS dBFS; placeholder until the R0 noise-floor table
+    detect_on_s: float = 1.5  # signal must last this long before casting
+    stop_after_silence_s: float = 180.0  # silence before stopping (longer than a side flip)
+    recast_max: int = 3  # automatic re-casts allowed per 10 minutes
+    state_path: str = "./state.json"
 
     @property
     def mp3_bitrate_bps(self) -> int:
@@ -55,7 +62,23 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "client_max_buffer_s": (int, float),
     "peak_log_s": (int, float),
     "metrics_path": (str,),
+    "auto_cast": (bool,),
+    "detect_threshold_db": (int, float),
+    "detect_on_s": (int, float),
+    "stop_after_silence_s": (int, float),
+    "recast_max": (int,),
+    "state_path": (str,),
 }
+_FLOATS = (
+    "client_max_buffer_s", "tone_beep_s", "peak_log_s",
+    "detect_threshold_db", "detect_on_s", "stop_after_silence_s",
+)  # fmt: skip
+
+# Keys the web UI may change (persisted in state.json). Never paths, devices or ports.
+UI_SETTABLE = frozenset(
+    {"codec", "mp3_bitrate", "auto_cast", "detect_threshold_db", "detect_on_s",
+     "stop_after_silence_s"}
+)  # fmt: skip
 assert set(_TYPES) == {f.name for f in fields(Config)}
 
 
@@ -67,12 +90,13 @@ def _coerce(values: dict[str, Any], origin: str) -> dict[str, Any]:
         if value is None:
             out[key] = None
             continue
-        # bool is a subclass of int; reject it explicitly.
-        if isinstance(value, bool) or not isinstance(value, _TYPES[key]):
+        # bool is a subclass of int: only accept it where a bool is expected.
+        wants_bool = _TYPES[key] == (bool,)
+        if isinstance(value, bool) != wants_bool or not isinstance(value, _TYPES[key]):
             raise ConfigError(f"{origin}: {key} has wrong type {type(value).__name__}")
         if key == "advertise_ip" and value == "auto":
             value = None
-        if key in ("client_max_buffer_s", "tone_beep_s", "peak_log_s"):
+        if key in _FLOATS:
             value = float(value)
         out[key] = value
     return out
@@ -97,10 +121,31 @@ def _validate(cfg: Config) -> None:
         raise ConfigError(f"peak_log_s must be >= 0: {cfg.peak_log_s}")
     if cfg.client_max_buffer_s <= 0:
         raise ConfigError(f"client_max_buffer_s must be positive: {cfg.client_max_buffer_s}")
+    if not -120 <= cfg.detect_threshold_db <= 0:
+        raise ConfigError(f"detect_threshold_db must be in -120..0: {cfg.detect_threshold_db}")
+    if cfg.detect_on_s <= 0:
+        raise ConfigError(f"detect_on_s must be positive: {cfg.detect_on_s}")
+    if cfg.stop_after_silence_s <= 0:
+        raise ConfigError(f"stop_after_silence_s must be positive: {cfg.stop_after_silence_s}")
+    if cfg.recast_max < 0:
+        raise ConfigError(f"recast_max must be >= 0: {cfg.recast_max}")
 
 
-def load_config(path: Path | None = None, overrides: dict[str, Any] | None = None) -> Config:
-    """Build a Config. `overrides` holds only values the user set explicitly."""
+def validate_ui_settings(settings: dict[str, Any]) -> dict[str, Any]:
+    """Check settings coming from the web UI / state.json: only UI_SETTABLE keys, right types."""
+    bad = set(settings) - UI_SETTABLE
+    if bad:
+        raise ConfigError(f"settings: not changeable from the UI: {', '.join(sorted(bad))}")
+    return _coerce(settings, "settings")
+
+
+def load_config(
+    path: Path | None = None,
+    overrides: dict[str, Any] | None = None,
+    settings: dict[str, Any] | None = None,
+) -> Config:
+    """Build a Config: defaults < TOML (`path`) < UI `settings` < CLI `overrides`.
+    `overrides` holds only values the user set explicitly."""
     cfg = Config()
     if path is not None:
         try:
@@ -109,6 +154,8 @@ def load_config(path: Path | None = None, overrides: dict[str, Any] | None = Non
         except (OSError, tomllib.TOMLDecodeError) as e:
             raise ConfigError(f"{path}: {e}") from e
         cfg = replace(cfg, **_coerce(data, str(path)))
+    if settings:
+        cfg = replace(cfg, **validate_ui_settings(settings))
     if overrides:
         cfg = replace(cfg, **_coerce(overrides, "command line"))
     _validate(cfg)
