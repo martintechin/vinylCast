@@ -92,6 +92,8 @@ no ICY metadata; accepts an endless chunked stream for MP3 and FLAC. A FLAC enco
 4. Early BUFFERING on HESTON 120 with FLAC — check if it recurs; possible fix (send new
    listeners a few seconds of recent audio) contradicts PLAN.md and needs approval.
 5. Loud-record level check; Wi-Fi power-save persistence after reboot; peak logging on ffmpeg 7.
+6. End-to-end latency ~2 s (needle lift → silence), parked: mostly the speaker's buffer; Pi
+   share estimated ≤ 0.2 s. Codec × speaker latency measurement would show if FLAC helps.
 
 ## 8. Not built (out of PoC scope)
 

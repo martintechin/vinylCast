@@ -81,6 +81,7 @@ Precedence: built-in defaults < TOML < flags.
 | Peak logging (`peak_log_s`) | Silences the stream on the Pi's ffmpeg 7 (both variants); off by default | Needs ffmpeg 7's error lines from a failed run |
 | Pi under-voltage | `get_throttled` 0x50000 on 2026-11-08: under-voltage and throttling have occurred since boot (not at that moment) | Official 5.1 V / 2.5 A supply and cable; after a reboot `vcgencmd get_throttled` must stay 0x0 (`journalctl -k \| grep -i voltage` shows when) |
 | Early BUFFERING on HESTON 120 (FLAC) | 0.5 s BUFFERING 0.5 s after first PLAYING; receiver starts with a tiny buffer (no history for new clients) | Longer run: does it recur after startup? |
+| End-to-end latency ~2 s (needle lift → silence) | Martin, 2026-11-08; parked. Estimated Pi share ≤ ~0.2 s (capture, encoder, framing holds one frame); the rest is the speaker's own buffer, not controllable with the default Cast receiver | Measure 5 lifts per codec × speaker: if FLAC is clearly faster the receiver buffers by bytes (argues for FLAC default + smaller FLAC blocks, ~0.15 s); else ~2 s is the floor. A custom Cast receiver app is the only direct lever (large, uncertain on audio-only speakers). Sending history to new clients would ADD latency |
 | Wi-Fi power save off after reboot | Set via nmcli on the netplan connection; persistence unverified | `iw dev wlan0 get power_save` after a reboot |
 
 ## Codec decision (M6)
