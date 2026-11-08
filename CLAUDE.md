@@ -35,7 +35,9 @@ not remove either path. Targets in use: "HESTON 120" (192.168.1.65) and
 Revision 1 per `docs/PLAN-rev1.md`: R0 done (inline 100 ms measurement, threshold −40 dBFS;
 24 h power check pending), R1 done (`vinylcast daemon` on the Pi: needle drop → HESTON 120 in
 ~5 s, stop 180 s after silence), R2 done (web API + SSE; codec switch while playing ~2 s on the
-Pi). R3 phone UI in progress: src/vinylcast/webui/index.html (one self-contained file, served at
+Pi), R3 done (phone UI accepted on Android Chrome). Next: R4 auto-cast acceptance (10 needle-drop
+cycles, side flip, manual stop, 2 h idle), then R5 (24 h unattended; systemd switches from `run`
+to `daemon`). UI: src/vinylcast/webui/index.html (one self-contained file, served at
 `/`; values only via textContent). log_level (default info): input_peak/http_request are DEBUG
 events (console only at debug; the metrics file gets all). Run daemon with `--config vinylcast.toml`. Windows PowerShell 5.1 sends
 Latin-1 unless the body is UTF-8 bytes (`[Text.Encoding]::UTF8.GetBytes`); JSON must be UTF-8. Decided: 180 s silence timeout,

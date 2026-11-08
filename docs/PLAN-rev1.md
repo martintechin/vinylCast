@@ -226,7 +226,9 @@ commit per milestone, hardware checks run by Martin with exact commands.
    tests, Pi output not reported) web.py, continuous discovery, volume.
    - API tests via aiohttp test client; SSE delivers levels ≥ 4 Hz and state changes < 0.5 s
    - On the Pi: `curl` play/stop/volume/settings work against a real speaker
-3. **R3 – Phone UI.**
+3. **R3 – Phone UI.** — **done 2026-11-08** (Martin, Android Chrome; layout changed on his
+   request: settings sheet behind a cog, speaker dropdown, level above speaker, icon buttons;
+   volume follows the speaker)
    - On Martin's phone: pick speaker, play/stop, volume, live meter (clip warning above −1 dBFS),
      settings persist across service restart, diagnostics shows Wi-Fi and throttling
    - Page load < 2 s on the Pi over Wi-Fi; no external resources (works without internet)
