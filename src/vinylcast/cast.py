@@ -359,6 +359,13 @@ class CastSession:
                                 content_id=media.content_id)  # fmt: skip
         return busy
 
+    @property
+    def volume(self) -> float | None:
+        """The speaker's current volume 0..1 from its receiver status (pychromecast keeps it
+        current, so changes from Google Home or the volume buttons show up too)."""
+        status = self._cast.status if self._cast is not None else None
+        return None if status is None else round(float(status.volume_level), 3)
+
     async def set_volume(self, level: float) -> float:
         """Speaker volume 0..1; returns what the receiver reports."""
         assert self._cast is not None

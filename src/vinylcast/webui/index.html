@@ -231,10 +231,20 @@ function renderStatus(s) {
   const active = s.state === "playing" || s.state === "starting";
   $("play").disabled = active || !s.target;
   $("stop").disabled = !active;
-  $("vol").disabled = s.state !== "playing";
+  renderVolume(s);
   $("signal").textContent = s.signal ? "♪ music" : "silence";
   if (s.level) renderLevel(s.level);
   renderDevices();
+}
+
+let volTouched = 0;  // the slider follows the speaker except while the user is moving it
+function renderVolume(s) {
+  const vol = $("vol"), known = s.volume !== null && s.volume !== undefined;
+  vol.disabled = !known || s.state !== "playing";
+  if (!known) { $("volval").textContent = ""; return; }
+  if (Date.now() - volTouched < 1500) return;
+  vol.value = Math.round(s.volume * 100);
+  $("volval").textContent = vol.value + "%";
 }
 
 function renderLevel(l) {
@@ -336,6 +346,7 @@ $("stop").addEventListener("click", async () => {
 
 let volTimer = null;
 $("vol").addEventListener("input", (e) => {
+  volTouched = Date.now();
   $("volval").textContent = e.target.value + "%";
   clearTimeout(volTimer);
   volTimer = setTimeout(async () => {

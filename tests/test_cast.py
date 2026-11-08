@@ -180,3 +180,14 @@ async def test_monitor_app_takeover(tmp_path: Path) -> None:
     from_thread(mon.new_cast_status, app("CC32E753"))
     await asyncio.sleep(0.05)
     assert ends == ["taken_over"]
+
+
+def test_session_volume_from_receiver_status() -> None:
+    from vinylcast.cast import CastSession
+
+    s = CastSession("T", Metrics(None))
+    assert s.volume is None  # not connected
+    s._cast = SimpleNamespace(status=None)  # type: ignore[assignment]
+    assert s.volume is None  # connected, no status yet
+    s._cast = SimpleNamespace(status=SimpleNamespace(volume_level=0.33333))  # type: ignore[assignment]
+    assert s.volume == 0.333

@@ -33,6 +33,8 @@ class SessionPort(Protocol):
     async def play(self, url: str, content_type: str) -> float | None: ...
     async def stop(self) -> None: ...
     async def set_volume(self, level: float) -> float: ...
+    @property
+    def volume(self) -> float | None: ...
     async def disconnect(self) -> None: ...
 
 
@@ -254,6 +256,9 @@ class Driver:
             "hold": self.controller.hold,
             "signal": self.controller.signal,
             "auto_cast": self.controller.auto_cast,
+            # Volume of the connected speaker (None without a connection); after a speaker
+            # switch this is the new speaker's own value (Martin: the slider must follow it).
+            "volume": self.session.volume if self.session is not None else None,
             "level": None if latest is None else
                 {"rms_db": round(latest.rms_db, 1), "peak_db": round(latest.peak_db, 1)},
             "notifications": list(self.notifications)[-5:],

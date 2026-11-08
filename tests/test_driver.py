@@ -26,6 +26,7 @@ class FakeSession:
     found: bool = True
     latency: float | None = 1.0
     content_id: str | None = None  # what the speaker's media receiver last loaded
+    volume: float | None = None  # the speaker's own volume (set by the rig per speaker)
 
     async def connect(self) -> None:
         self.log.append(f"connect {self.name}")
@@ -51,6 +52,7 @@ class FakeSession:
             asyncio.get_running_loop().call_later(0.01, self.on_end, "cancelled")
 
     async def set_volume(self, level: float) -> float:
+        self.volume = level
         return level
 
     async def disconnect(self) -> None:
@@ -67,6 +69,9 @@ class FakeService:
         self.cfg = cfg
         self.reconfigured.append(cfg)
         return changed
+
+
+SPEAKER_VOLUMES = {"HESTON 120": 0.6, "Tvättstugan": 0.25}
 
 
 class Rig:
@@ -89,6 +94,7 @@ class Rig:
 
     def factory(self, name: str, on_end: Callable[[str], None]) -> FakeSession:
         s = FakeSession(name, on_end, self.log, **self.session_kw)  # type: ignore[arg-type]
+        s.volume = SPEAKER_VOLUMES.get(name)
         self.sessions.append(s)
         return s
 
@@ -235,3 +241,15 @@ async def test_own_stop_confirmation_ignored_but_speaker_stop_counts(rig: Rig) -
     await wait_until(lambda: len(rig.driver.notifications) > 0)  # Notify runs after the state
     assert state(rig) == State.IDLE and rig.driver.controller.hold == "manual"
     assert rig.driver.notifications[-1]["message"].startswith("Stopped on the speaker")
+
+
+async def test_status_volume_follows_the_connected_speaker(rig: Rig) -> None:
+    """Martin: after a speaker switch the page showed the old speaker's volume."""
+    assert rig.driver.status()["volume"] is None  # no connection yet
+    rig.levels(2, -30)
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    assert rig.driver.status()["volume"] == 0.6
+    rig.driver.play("Tvättstugan")
+    await wait_until(lambda: rig.driver.status()["volume"] == 0.25)
+    assert await rig.driver.set_volume(0.4) == 0.4
+    assert rig.driver.status()["volume"] == 0.4
