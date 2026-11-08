@@ -19,7 +19,9 @@ class ConfigError(ValueError):
 @dataclass(frozen=True)
 class Config:
     source: str = "alsa"
-    alsa_device: str = "plughw:CARD=CODEC,DEV=0"
+    # hw: (not plughw:) so an unsupported rate fails instead of being resampled by ALSA.
+    # UFO202 native capture: S16_LE stereo at 48000/44100/32000/22050/16000/11025 Hz.
+    alsa_device: str = "hw:CARD=CODEC,DEV=0"
     source_file: str | None = None
     tone_beep_s: float = 0.0  # 0 = continuous tone; N > 0 = 0.1 s beep every N s (latency checks)
     sample_rate: int = 44100

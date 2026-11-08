@@ -6,7 +6,7 @@ from vinylcast.source import input_args, output_args
 def test_alsa() -> None:
     cfg = load_config(overrides={"sample_rate": 48000})
     assert input_args(cfg) == [
-        "-f", "alsa", "-sample_rate", "48000", "-channels", "2", "-i", "plughw:CARD=CODEC,DEV=0",
+        "-f", "alsa", "-sample_rate", "48000", "-channels", "2", "-i", "hw:CARD=CODEC,DEV=0",
     ]  # fmt: skip
 
 

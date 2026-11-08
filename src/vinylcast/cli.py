@@ -162,8 +162,15 @@ def _run(cfg: Config, args: argparse.Namespace) -> int:
     return asyncio.run(run_cast(cfg)) if _need_target(cfg, "run") else 2
 
 
+def _levels(cfg: Config, args: argparse.Namespace) -> int:
+    from vinylcast.levels import run_levels
+
+    return asyncio.run(run_levels(cfg, getattr(args, "duration", None)))
+
+
 IMPLEMENTED: dict[str, Callable[[Config, argparse.Namespace], int]] = {
     "serve": _serve,
+    "levels": _levels,
     "devices": _devices,
     "cast": _cast,
     "stop": _stop,
@@ -196,6 +203,9 @@ def build_parser() -> argparse.ArgumentParser:
                 default=argparse.SUPPRESS,
                 help="Friendly name of a Cast device or group",
             )
+        if name == "levels":
+            sp.add_argument("--duration", type=float, default=argparse.SUPPRESS,
+                            help="stop after N seconds (default: until Ctrl-C)")  # fmt: skip
         sp.set_defaults(handler=IMPLEMENTED.get(name) or _not_implemented(milestone))
     return parser
 

@@ -5,8 +5,9 @@
 # Audio source: "alsa", "tone" or "file"
 source = "alsa"
 
-# ALSA capture device. Confirm on the Pi with `arecord -L`.
-alsa_device = "plughw:CARD=CODEC,DEV=0"
+# ALSA capture device. Confirm on the Pi with `arecord -L`. hw: (no conversions) so an
+# unsupported rate fails loudly instead of being resampled silently by ALSA.
+alsa_device = "hw:CARD=CODEC,DEV=0"
 
 # Path to an audio file; required when source = "file".
 # source_file = "/path/to/test.flac"
@@ -14,7 +15,8 @@ alsa_device = "plughw:CARD=CODEC,DEV=0"
 # Tone source only: 0 = continuous 440 Hz; N > 0 = a 0.1 s beep every N seconds (latency checks).
 tone_beep_s = 0
 
-# Sample rate in Hz. Must be a rate the UFO202 reports (`arecord --dump-hw-params`).
+# Sample rate in Hz. UFO202 native capture rates (cat /proc/asound/CODEC/stream0):
+# 48000, 44100, 32000, 22050, 16000, 11025.
 sample_rate = 44100
 
 # Codec: "mp3" or "flac"

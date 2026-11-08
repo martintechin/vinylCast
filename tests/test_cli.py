@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from vinylcast.cli import COMMANDS, EXIT_NOT_IMPLEMENTED, build_parser, config_from_args, main
+from vinylcast.cli import COMMANDS, build_parser, config_from_args, main
 
 
 def test_help_lists_all_subcommands() -> None:
@@ -16,9 +16,10 @@ def test_help_lists_all_subcommands() -> None:
     assert len(COMMANDS) == 6
 
 
-def test_stub_returns_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["levels"]) == EXIT_NOT_IMPLEMENTED
-    assert "not implemented" in capsys.readouterr().err
+def test_every_command_is_implemented() -> None:
+    from vinylcast.cli import IMPLEMENTED
+
+    assert set(IMPLEMENTED) == set(COMMANDS)
 
 
 def test_flags_override_toml(tmp_path: Path) -> None:

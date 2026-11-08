@@ -3,7 +3,18 @@
 PoC: turntable → phono preamp → Behringer UFO202 → Raspberry Pi 3 → HTTP audio stream → Chromecast device or Cast group.
 See [PLAN.md](PLAN.md) for scope, milestones and acceptance criteria.
 
-Status: **M3 (Cast) passed on a single device (Nest Mini); group checks open (no group yet).** `serve` streams MP3 or FLAC from the
+Status: **M4 (on the Pi), code done, hardware acceptance pending.** M3 passed on a single
+device (Nest Mini); group checks open (no group yet).
+
+## On the Pi
+
+```sh
+scripts/deploy.sh                 # git pull, venv + install, vinylcast.toml, systemd unit
+vinylcast levels                  # live dBFS from the UFO202; keep peaks below -1 dBFS
+vinylcast run --to "<device>"     # vinyl to Cast (source defaults to alsa)
+sudo systemctl start vinylcast    # unattended, using vinylcast.toml (needs cast_target)
+journalctl -u vinylcast -f
+``` `serve` streams MP3 or FLAC from the
 `tone`, `file` or `alsa` source; `devices`, `cast`, `stop` and `run` control Cast devices and groups.
 
 ## Quick start (no hardware)
@@ -42,7 +53,7 @@ Precedence: built-in defaults < TOML < flags.
 | Command | Does | Milestone |
 | --- | --- | --- |
 | `devices` | Lists Cast devices and groups | M3 |
-| `levels` | Peak/RMS dBFS once per second | M4 |
+| `levels [--duration N]` | Peak/RMS dBFS per channel once per second | M4 |
 | `serve` | Encoder + hub + HTTP server | M1 |
 | `cast --to NAME` | Sends the stream URL to a target | M3 |
 | `stop --to NAME` | Stops playback on a target | M3 |

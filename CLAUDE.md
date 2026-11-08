@@ -17,6 +17,8 @@ pytest tests/test_hub.py::test_fan_out         # single test
 pytest -k slow                                 # by name
 vinylcast serve --source tone                  # dev-machine stream, no hardware; prints URL
 vinylcast serve --source tone --codec flac     # FLAC variant
+vinylcast levels --source tone --duration 3    # level meter (astats); on the Pi: UFO202
+scripts/deploy.sh                              # ON THE PI: pull, install, systemd unit
 python -m vinylcast --help                     # all subcommands; unimplemented ones exit 3
 python scripts/bench_framing.py 20             # framing CPU cost per codec
 tests/fixtures/make_fixtures.sh                # regenerate framing fixtures (ffmpeg)
@@ -82,6 +84,11 @@ cast.py wraps pychromecast 14.1.1, which is synchronous and threaded: blocking c
 `cast` and `stop` are separate short-lived processes appending to the same metrics file; `run` is
 serve + cast in one process and the soak-test entry point. Cast events: `cast_state` (every player
 state change, with `after_first_playing`), `cast_startup` (latency), `cast_connection`, errors.
+
+UFO202 (measured): card CODEC, USB full speed, native capture S16_LE stereo at 48000/44100/32000/
+22050/16000/11025 Hz. Default device is `hw:CARD=CODEC,DEV=0` (not plughw) so an unsupported
+rate fails instead of being resampled by ALSA. The systemd unit (deploy/vinylcast.service, a
+template filled by deploy.sh) runs `vinylcast run --config vinylcast.toml` and stops with SIGINT.
 
 Observed receiver behaviour (Nest Mini, "Cast Lite", M3): GET only, HTTP/1.1 keep-alive, no Range,
 no HEAD, no Icy-MetaData; sends Accept-Encoding gzip/deflate, so never enable compression. Chunked

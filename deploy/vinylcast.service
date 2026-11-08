@@ -1,0 +1,25 @@
+# VinylCast systemd unit (template). scripts/deploy.sh fills in @USER@ and @DIR@ and installs
+# it as /etc/systemd/system/vinylcast.service. Runs `vinylcast run` with vinylcast.toml, which
+# must set cast_target.
+[Unit]
+Description=VinylCast: turntable to Cast stream
+Wants=network-online.target
+After=network-online.target sound.target
+
+[Service]
+Type=simple
+User=@USER@
+SupplementaryGroups=audio
+WorkingDirectory=@DIR@
+ExecStart=@DIR@/.venv/bin/vinylcast run --config @DIR@/vinylcast.toml
+Environment=PYTHONUNBUFFERED=1
+# SIGINT = the same clean shutdown as Ctrl-C: stops playback on the target, then ffmpeg.
+KillSignal=SIGINT
+TimeoutStopSec=25
+# Retry e.g. a target not yet reachable after boot; exit 2 is a config error, so don't loop.
+Restart=on-failure
+RestartSec=10
+RestartPreventExitStatus=2
+
+[Install]
+WantedBy=multi-user.target
