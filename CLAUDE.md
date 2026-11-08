@@ -32,8 +32,9 @@ and Wi-Fi power-save persistence). Codec decision (M6, Martin): keep BOTH codecs
 not remove either path. Targets in use: "HESTON 120" (192.168.1.65) and
 "Tvättstugan" (Nest Mini, 192.168.1.124); both "Cast Lite" receivers.
 
-Next: revision 1 per `docs/PLAN-rev1.md` (auto-cast on needle drop, phone web UI), starting
-with R0 (power fix, ffmpeg 7 measurement spike, noise floor). Decided: 180 s silence timeout,
+Revision 1 per `docs/PLAN-rev1.md`: R0 done (inline 100 ms measurement, threshold −40 dBFS;
+24 h power check pending), R1 done (`vinylcast daemon` on the Pi: needle drop → HESTON 120 in
+~5 s, stop 180 s after silence). Next: R2 web API. Run daemon with `--config vinylcast.toml`. Decided: 180 s silence timeout,
 English UI, no auth in rev 1 (device-code login later).
 
 ## Working rules

@@ -215,7 +215,8 @@ commit per milestone, hardware checks run by Martin with exact commands.
      stall/restart and level lines ≥ 4 Hz; decision recorded
    - Noise floor table: stylus up, silent lead-in, run-out groove, quiet and loud music
      (RMS/peak); thresholds proposed from it
-1. **R1 – Control core.** state.py, detector.py (fed by the chosen measurement), controller.py in
+1. **R1 – Control core.** — **done 2026-11-08** (Pi evidence in the R1 commit; the codec-switch
+   check on the Pi moves to R2, where the API can trigger it) state.py, detector.py (fed by the chosen measurement), controller.py in
    manual mode, CLI on top of the controller, codec change without process restart.
    - Unit tests: state machine (fake clock/cast), detector hysteresis, state file round-trip
    - On the Pi: `vinylcast run` behaves as in the PoC; codec switch while playing re-casts
