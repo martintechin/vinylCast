@@ -1,0 +1,34 @@
+# VinylCast configuration. Copy to vinylcast.toml and pass with --config.
+# Every key can be overridden by a CLI flag of the same name (underscores -> dashes).
+# Defaults are starting points, not decisions.
+
+# Audio source: "alsa", "tone" or "file"
+source = "alsa"
+
+# ALSA capture device. Confirm on the Pi with `arecord -L`.
+alsa_device = "plughw:CARD=CODEC,DEV=0"
+
+# Path to an audio file; required when source = "file".
+# source_file = "/path/to/test.flac"
+
+# Sample rate in Hz. Must be a rate the UFO202 reports (`arecord --dump-hw-params`).
+sample_rate = 44100
+
+# Codec: "mp3" or "flac"
+codec = "mp3"
+mp3_bitrate = "320k"
+
+# HTTP port; binds on all interfaces.
+http_port = 8800
+
+# IP placed in the stream URL sent to the receiver. "auto" = interface on the default route.
+advertise_ip = "auto"
+
+# Friendly name of a Cast device or group.
+# cast_target = "Living Room"
+
+# Seconds of audio a client may lag before it is dropped.
+client_max_buffer_s = 10
+
+# JSONL metrics log. Use one file per soak-test run.
+metrics_path = "./metrics.jsonl"
