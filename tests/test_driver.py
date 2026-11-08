@@ -45,6 +45,10 @@ class FakeSession:
 
     async def stop(self) -> None:
         self.log.append(f"stop {self.name}")
+        # Like a real receiver: our stop is confirmed as IDLE/CANCELLED, which arrives as an
+        # end report shortly afterwards (pychromecast thread -> event loop).
+        if self.content_id is not None:
+            asyncio.get_running_loop().call_later(0.01, self.on_end, "cancelled")
 
     async def set_volume(self, level: float) -> float:
         return level
@@ -202,3 +206,32 @@ async def test_status_snapshot(rig: Rig) -> None:
     st = rig.driver.status()
     assert st["target"] == "HESTON 120" and st["state"] == "idle"
     assert st["level"] == {"rms_db": -42.0, "peak_db": -32.0}
+
+
+async def test_switch_speaker_old_speakers_cancel_is_not_a_manual_stop(rig: Rig) -> None:
+    """Regression (Martin's phone, R3): switching speakers while playing showed "Stopped on
+    the speaker" and state idle although the new speaker played. The old speaker's CANCELLED
+    (confirming our own stop) was taken for a user stop."""
+    rig.levels(2, -30)
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    rig.driver.play("Tvättstugan")
+    await wait_until(lambda: any(e.startswith("play Tvättstugan") for e in rig.log))
+    await asyncio.sleep(0.1)  # let the old speaker's CANCELLED arrive
+    assert state(rig) == State.PLAYING and rig.driver.controller.target == "Tvättstugan"
+    assert rig.driver.controller.hold is None
+    assert not rig.driver.notifications
+
+
+async def test_own_stop_confirmation_ignored_but_speaker_stop_counts(rig: Rig) -> None:
+    rig.levels(2, -30)
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    rig.driver.stop()  # our stop: its CANCELLED must not add a "Stopped on the speaker" note
+    await wait_until(lambda: state(rig) == State.IDLE)
+    await asyncio.sleep(0.1)
+    assert not rig.driver.notifications and rig.driver.controller.hold == "manual"
+    rig.driver.play()
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    rig.sessions[-1].on_end("cancelled")  # a stop made on the speaker itself still counts
+    await wait_until(lambda: len(rig.driver.notifications) > 0)  # Notify runs after the state
+    assert state(rig) == State.IDLE and rig.driver.controller.hold == "manual"
+    assert rig.driver.notifications[-1]["message"].startswith("Stopped on the speaker")

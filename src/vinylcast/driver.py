@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import itertools
 import time
 from collections import deque
 from collections.abc import Callable
@@ -84,6 +85,13 @@ class Driver:
         self.notifications: deque[dict[str, Any]] = deque(maxlen=20)
         self._queue: asyncio.Queue[Action] = asyncio.Queue()
         self._casting = False  # ends reported while we (re)cast are our own doing
+        # Every connection gets an id. End reports count only from the active connection and
+        # only if we did not stop it ourselves: a speaker confirms OUR stop with IDLE/CANCELLED,
+        # which must not look like a user's stop (bug on Martin's phone: speaker switch showed
+        # "Stopped on the speaker" while the new speaker played).
+        self._sids = itertools.count(1)
+        self._active_sid: int | None = None
+        self._stopped_sids: set[int] = set()
 
     # ------------------------------------------------------------- inputs
 
@@ -97,8 +105,15 @@ class Driver:
             self.metrics.event("signal", on=False, rms_db=round(level.rms_db, 1))
             self._apply(self.controller.signal_off(now))
 
-    def _on_end(self, reason: str) -> None:
-        if self._casting:
+    def _on_end(self, sid: int, reason: str) -> None:
+        if self._casting or sid != self._active_sid or sid in self._stopped_sids:
+            if self._casting:
+                why = "own (re)cast"
+            elif sid != self._active_sid:
+                why = "replaced connection"
+            else:
+                why = "our stop"
+            self.metrics.event("cast_end_ignored", session=sid, reason=reason, why=why)
             return
         self._apply(self.controller.cast_ended(self._clock(), reason))  # type: ignore[arg-type]
 
@@ -177,6 +192,8 @@ class Driver:
 
     async def _stop_session(self) -> None:
         if self.session is not None:
+            if self._active_sid is not None:
+                self._stopped_sids.add(self._active_sid)
             with contextlib.suppress(Exception):
                 await self.session.stop()
 
@@ -189,16 +206,19 @@ class Driver:
                 await self.session.disconnect()
                 self.session = None
             if self.session is None:
-                session = self._factory(action.target, self._on_end)
+                sid = next(self._sids)
+                session = self._factory(action.target, lambda why, sid=sid: self._on_end(sid, why))
                 try:
                     await session.connect()
                 except CastError:
                     self._apply(self.controller.cast_failed(self._clock(), "not_found"))
                     return
-                self.session = session
+                self.session, self._active_sid = session, sid
             if await self.session.is_busy(url):
                 self._apply(self.controller.cast_failed(self._clock(), "busy"))
                 return
+            if self._active_sid is not None:
+                self._stopped_sids.discard(self._active_sid)  # a new playback: its ends count
             latency = await self.session.play(url, CONTENT_TYPES[cfg.codec])
         except Exception as e:
             self.metrics.event("driver_error", action=repr(action), error=repr(e))
