@@ -47,30 +47,40 @@ def codec_args(cfg: Config) -> list[str]:
     raise ValueError(f"unknown codec {cfg.codec!r}")
 
 
-def peak_filter_args(cfg: Config) -> list[str]:
-    """Measure the input peak per `peak_log_s` block in a separate branch (asplit), so the
-    encoder itself still gets audio without added latency. Results are info-level log lines
-    ("[info] lavfi.astats.N.Peak_level=..."), parsed by levels.PeakLogger."""
+def peak_graph(cfg: Config) -> str | None:
+    """Filter graph that splits the input: `[enc]` feeds the encoder unchanged, `[peak]`
+    measures the input peak per `peak_log_s` block. Results are info-level log lines
+    ("[info] lavfi.astats.N.Peak_level=..."), parsed by levels.PeakLogger.
+
+    The measuring branch ends in its own `-f null` output. An in-graph `anullsink` (the
+    first version) makes ffmpeg 7's scheduler abort ("Assertion best_input >= 0 failed",
+    "100 buffers queued in out_#0:0") with no audio out (found on Martin's Pi).
+    """
     if cfg.peak_log_s <= 0:
-        return []
+        return None
     block = max(1, round(cfg.sample_rate * cfg.peak_log_s))
-    graph = (
+    return (
         "[0:a]asplit=2[enc][m];"
         f"[m]asetnsamples=n={block}:p=0,"
         "astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"
-        "ametadata=mode=print,anullsink"
+        "ametadata=mode=print[peak]"
     )
-    return ["-filter_complex", graph, "-map", "[enc]"]
 
 
 def build_command(cfg: Config, ffmpeg: str = "ffmpeg") -> list[str]:
     # level+info: every log line carries "[info]" / "[warning]" / "[error]" so warnings can be
     # told apart from the info-level peak lines.
-    return [
-        ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "level+info",
-        *source.input_args(cfg), *peak_filter_args(cfg), *source.output_args(cfg),
-        *codec_args(cfg), "pipe:1",
-    ]  # fmt: skip
+    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "level+info",
+           *source.input_args(cfg)]  # fmt: skip
+    graph = peak_graph(cfg)
+    if graph:
+        cmd += ["-filter_complex", graph, "-map", "[enc]"]
+    # Output 1: the stream (options before pipe:1 apply to this output only).
+    cmd += [*source.output_args(cfg), *codec_args(cfg), "pipe:1"]
+    if graph:
+        # Output 2: discard the measuring branch; only its log lines matter.
+        cmd += ["-map", "[peak]", "-f", "null", "-"]
+    return cmd
 
 
 class EncoderState(StrEnum):

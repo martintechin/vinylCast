@@ -97,3 +97,26 @@ async def test_restart_keeps_clients_and_header(svc: Service, tmp_path: Path) ->
         assert errors == []
     else:
         assert errors and all("non monotonically increasing dts" in e for e in errors)
+
+
+@pytest.fixture
+async def svc_peaks(tmp_path: Path) -> AsyncIterator[Service]:
+    cfg = load_config(overrides={"source": "tone", "peak_log_s": 1,
+                                 "metrics_path": str(tmp_path / "m.jsonl")})  # fmt: skip
+    service = Service(cfg, sample_interval_s=0.5)
+    service.port = await service.start(port=0)  # type: ignore[attr-defined]
+    yield service
+    await service.stop()
+
+
+async def test_stream_with_peak_logging(svc_peaks: Service, tmp_path: Path) -> None:
+    """Peak measurement must not hold back the stream: steady data and clean decode."""
+    url = f"http://127.0.0.1:{svc_peaks.port}/stream.mp3"  # type: ignore[attr-defined]
+    rec = tmp_path / "rec.mp3"
+    await record(url, rec, 4)
+    assert rec.stat().st_size > 3 * 40_000 * 0.8  # ~40 kB/s at 320k
+    assert decode_errors(rec) == []
+    path = Path(svc_peaks.cfg.metrics_path)
+    peaks = events(path, "input_peak")
+    assert len(peaks) >= 2 and peaks[0]["peak_db"] == pytest.approx(-18.06, abs=0.1)
+    assert events(path, "encoder_restart") == [] and events(path, "ffmpeg_warning") == []
