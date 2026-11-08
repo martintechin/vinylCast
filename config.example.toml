@@ -35,9 +35,9 @@ advertise_ip = "auto"
 # Seconds of audio a client may lag before it is dropped.
 client_max_buffer_s = 10
 
-# Log the input peak level every N seconds during serve/run (0 = off). Catches clipping in
-# unattended runs; the soak summary reports the loudest peak.
-peak_log_s = 10
+# Log the input peak level every N seconds during serve/run (0 = off). EXPERIMENTAL and off:
+# with the Pi's ffmpeg 7 it silenced the stream; it works with ffmpeg 6.1.
+peak_log_s = 0
 
 # JSONL metrics log. Use one file per soak-test run; strftime codes are expanded when the
 # file is opened, e.g. "./soak-%Y%m%d-%H%M.jsonl".

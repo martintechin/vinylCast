@@ -31,7 +31,9 @@ class Config:
     advertise_ip: str | None = None  # None = auto-detect from the default route
     cast_target: str | None = None
     client_max_buffer_s: float = 10.0
-    peak_log_s: float = 10.0  # input peak logged every N s by the encoder's ffmpeg; 0 = off
+    # Input peak logged every N s by the encoder's ffmpeg; 0 = off. Off by default: on the
+    # Pi's ffmpeg 7 both variants tried so far silenced the stream (works on ffmpeg 6.1).
+    peak_log_s: float = 0.0
     metrics_path: str = "./metrics.jsonl"  # strftime codes allowed, e.g. soak-%Y%m%d-%H%M.jsonl
 
     @property
