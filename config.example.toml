@@ -11,6 +11,9 @@ alsa_device = "plughw:CARD=CODEC,DEV=0"
 # Path to an audio file; required when source = "file".
 # source_file = "/path/to/test.flac"
 
+# Tone source only: 0 = continuous 440 Hz; N > 0 = a 0.1 s beep every N seconds (latency checks).
+tone_beep_s = 0
+
 # Sample rate in Hz. Must be a rate the UFO202 reports (`arecord --dump-hw-params`).
 sample_rate = 44100
 

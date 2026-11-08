@@ -3,7 +3,18 @@
 PoC: turntable → phono preamp → Behringer UFO202 → Raspberry Pi 3 → HTTP audio stream → Chromecast device or Cast group.
 See [PLAN.md](PLAN.md) for scope, milestones and acceptance criteria.
 
-Status: **M0 (skeleton)** — CLI and config only; subcommands are stubs.
+Status: **M1 (encode and serve)** — `serve` streams MP3 from the `tone`, `file` or `alsa` source.
+FLAC (M2) and Cast (M3) are not implemented yet.
+
+## Quick start (no hardware)
+
+```sh
+vinylcast serve --source tone          # prints the stream URL
+ffplay http://<ip>:8800/stream.mp3     # or open the URL in VLC
+curl http://<ip>:8800/health
+```
+
+Events and 5 s samples go to `./metrics.jsonl` (`--metrics-path` to change).
 
 ## Development
 
@@ -20,6 +31,9 @@ pytest
 ## Configuration
 
 Copy `config.example.toml` to `vinylcast.toml` and pass `--config vinylcast.toml`.
+`tone_beep_s` (not in the original plan) switches the tone source to a 0.1 s beep every N
+seconds for latency checks. `source_file` is the path used by the `file` source.
+
 Every key can be overridden with a flag (`sample_rate` → `--sample-rate`); `cast_target` is `--to`.
 Precedence: built-in defaults < TOML < flags.
 

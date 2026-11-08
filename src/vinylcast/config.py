@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, fields, replace
 from pathlib import Path
@@ -20,6 +21,7 @@ class Config:
     source: str = "alsa"
     alsa_device: str = "plughw:CARD=CODEC,DEV=0"
     source_file: str | None = None
+    tone_beep_s: float = 0.0  # 0 = continuous tone; N > 0 = 0.1 s beep every N s (latency checks)
     sample_rate: int = 44100
     codec: str = "mp3"
     mp3_bitrate: str = "320k"
@@ -29,11 +31,16 @@ class Config:
     client_max_buffer_s: float = 10.0
     metrics_path: str = "./metrics.jsonl"
 
+    @property
+    def mp3_bitrate_bps(self) -> int:
+        return int(self.mp3_bitrate[:-1]) * 1000
+
 
 _TYPES: dict[str, tuple[type, ...]] = {
     "source": (str,),
     "alsa_device": (str,),
     "source_file": (str,),
+    "tone_beep_s": (int, float),
     "sample_rate": (int,),
     "codec": (str,),
     "mp3_bitrate": (str,),
@@ -59,7 +66,7 @@ def _coerce(values: dict[str, Any], origin: str) -> dict[str, Any]:
             raise ConfigError(f"{origin}: {key} has wrong type {type(value).__name__}")
         if key == "advertise_ip" and value == "auto":
             value = None
-        if key == "client_max_buffer_s":
+        if key in ("client_max_buffer_s", "tone_beep_s"):
             value = float(value)
         out[key] = value
     return out
@@ -76,6 +83,10 @@ def _validate(cfg: Config) -> None:
         raise ConfigError(f"http_port out of range: {cfg.http_port}")
     if cfg.sample_rate <= 0:
         raise ConfigError(f"sample_rate must be positive: {cfg.sample_rate}")
+    if not re.fullmatch(r"[1-9][0-9]*k", cfg.mp3_bitrate):
+        raise ConfigError(f"mp3_bitrate must look like '320k', got {cfg.mp3_bitrate!r}")
+    if cfg.tone_beep_s < 0:
+        raise ConfigError(f"tone_beep_s must be >= 0: {cfg.tone_beep_s}")
     if cfg.client_max_buffer_s <= 0:
         raise ConfigError(f"client_max_buffer_s must be positive: {cfg.client_max_buffer_s}")
 

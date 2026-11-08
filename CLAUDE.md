@@ -10,7 +10,7 @@ PLAN.md is the source of truth for scope, milestones and acceptance criteria. Re
 
 ## Code
 - Python 3.11+, asyncio throughout, type hints everywhere. `ruff check`, `ruff format`, `pytest` must pass.
-- Runtime dependencies: aiohttp, pychromecast, psutil only (pinned `==` in pyproject.toml). Ask before adding any other dependency, including dev ones.
+- Runtime dependencies: aiohttp, pychromecast, psutil only (pinned `==` in pyproject.toml). Ask before adding any other dependency, including dev ones. Dev dependencies approved so far: pytest, ruff, pytest-asyncio (async tests and fixtures; aiohttp's own pytest plugin is deprecated and not used).
 - Don't write aiohttp or pychromecast calls from memory: read the installed version's source (`.venv/lib/python*/site-packages/...`) first. If you bump a pin, re-verify.
 - Audio processing stays in ffmpeg. Python never decodes, resamples or mixes audio; it only moves encoded bytes and controls Cast.
 - Tests that need hardware or Cast devices never run automatically. Integration tests use the `tone` source and ffmpeg decode checks.
@@ -34,7 +34,12 @@ audio path (one encoder, one hub; a new client costs a queue, not an encode)
       |  HTTP pull
   Cast receiver  <--- play_media(url with Pi's LAN IP) ---  cast.py
 
-control: cli.py -> config.py; metrics.py records events + 5 s samples (JSONL)
+control: cli.py -> service.py (wires encoder -> hub -> server + sampler) -> config.py
+metrics.py records events + 5 s samples (JSONL)
 ```
+
+Slow-client detection depends on server.py limiting per-connection socket buffering
+(SO_SNDBUF + transport high-water mark); without it Linux absorbs ~100 s of audio per
+stalled connection and the hub never sees the lag. Keep test producers real-time.
 
 Module boundaries matter: revision 1 replaces `cli.py` with a web UI without touching the audio path.

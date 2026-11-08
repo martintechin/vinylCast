@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import logging
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -22,6 +24,7 @@ def _common_parser() -> argparse.ArgumentParser:
     g.add_argument("--source", choices=SOURCES)
     g.add_argument("--alsa-device")
     g.add_argument("--source-file")
+    g.add_argument("--tone-beep-s", type=float, help="tone source: beep every N s (0 = continuous)")
     g.add_argument("--sample-rate", type=int)
     g.add_argument("--codec", choices=CODECS)
     g.add_argument("--mp3-bitrate")
@@ -36,6 +39,7 @@ CONFIG_KEYS = (
     "source",
     "alsa_device",
     "source_file",
+    "tone_beep_s",
     "sample_rate",
     "codec",
     "mp3_bitrate",
@@ -53,6 +57,17 @@ def _not_implemented(milestone: str) -> Callable[[Config, argparse.Namespace], i
 
     return handler
 
+
+def _serve(cfg: Config, args: argparse.Namespace) -> int:
+    from vinylcast.service import run_serve
+
+    if cfg.codec != "mp3":
+        print("serve: FLAC streaming is not implemented until M2", file=sys.stderr)
+        return EXIT_NOT_IMPLEMENTED
+    return asyncio.run(run_serve(cfg))
+
+
+IMPLEMENTED: dict[str, Callable[[Config, argparse.Namespace], int]] = {"serve": _serve}
 
 COMMANDS: dict[str, tuple[str, str, bool]] = {
     # name: (help, milestone, takes --to)
@@ -80,7 +95,7 @@ def build_parser() -> argparse.ArgumentParser:
                 default=argparse.SUPPRESS,
                 help="Friendly name of a Cast device or group",
             )
-        sp.set_defaults(handler=_not_implemented(milestone))
+        sp.set_defaults(handler=IMPLEMENTED.get(name) or _not_implemented(milestone))
     return parser
 
 
@@ -91,6 +106,9 @@ def config_from_args(args: argparse.Namespace) -> Config:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", stream=sys.stderr
+    )
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
