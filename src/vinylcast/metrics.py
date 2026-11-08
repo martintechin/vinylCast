@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -24,10 +25,13 @@ class Metrics:
     def __init__(self, path: str | Path | None) -> None:
         self.path = Path(path) if path is not None else None
         self._fh = self.path.open("a", buffering=1, encoding="utf-8") if self.path else None
+        self._lock = threading.Lock()  # pychromecast callbacks log from their own threads
 
     def _write(self, record: dict[str, Any]) -> None:
-        if self._fh is not None:
-            self._fh.write(json.dumps(record, separators=(",", ":"), default=str) + "\n")
+        line = json.dumps(record, separators=(",", ":"), default=str) + "\n"
+        with self._lock:
+            if self._fh is not None:
+                self._fh.write(line)
 
     def event(self, name: str, **fields: Any) -> None:
         self._write({"ts": round(time.time(), 3), "kind": "event", "event": name, **fields})
@@ -37,9 +41,10 @@ class Metrics:
         self._write({"ts": round(time.time(), 3), "kind": "sample", **fields})
 
     def close(self) -> None:
-        if self._fh is not None:
-            self._fh.close()
-            self._fh = None
+        with self._lock:
+            if self._fh is not None:
+                self._fh.close()
+                self._fh = None
 
 
 def read_records(path: str | Path) -> Iterator[dict[str, Any]]:

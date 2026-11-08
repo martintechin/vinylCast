@@ -1,1 +1,246 @@
-"""Cast discovery, play, stop and media status listener via pychromecast. (M3)"""
+"""Cast discovery, play, stop and status logging via pychromecast.
+
+pychromecast (verified against 14.1.1) is synchronous and runs its own socket and
+zeroconf threads. Blocking calls are run with `asyncio.to_thread`; its listener
+callbacks arrive on its threads and only touch thread-safe state (Metrics has a lock)
+or hand over to the event loop with `call_soon_threadsafe`.
+
+cast.py only hands the receiver a URL. From then on the receiver pulls the stream from
+server.py like any other HTTP client.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import threading
+import time
+from dataclasses import dataclass
+from typing import Any
+
+import pychromecast
+from pychromecast.const import CAST_TYPE_GROUP
+from pychromecast.controllers.media import MediaStatus, MediaStatusListener
+from pychromecast.controllers.receiver import LaunchErrorListener, LaunchFailure
+from pychromecast.discovery import CastBrowser, SimpleCastListener
+from pychromecast.socket_client import ConnectionStatus, ConnectionStatusListener
+
+from vinylcast.metrics import Metrics
+
+DISCOVERY_TIMEOUT_S = 5.0
+CONNECT_TIMEOUT_S = 15.0
+PLAYING_TIMEOUT_S = 20.0
+TITLE = "VinylCast"
+
+
+class CastError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class Target:
+    name: str
+    model: str
+    cast_type: str  # pychromecast: "cast", "audio" or "group"
+    host: str
+    port: int
+    uuid: str
+
+    @property
+    def kind(self) -> str:
+        return "group" if self.cast_type == CAST_TYPE_GROUP else "device"
+
+
+def discover(timeout_s: float = DISCOVERY_TIMEOUT_S) -> list[Target]:
+    """Browse mDNS for `timeout_s` and return every Cast device and group seen (blocking)."""
+    browser = CastBrowser(SimpleCastListener(), pychromecast.discovery.create_zeroconf())
+    browser.start_discovery()
+    try:
+        time.sleep(timeout_s)
+        infos = list(browser.devices.values())
+    finally:
+        browser.stop_discovery()
+    return sorted(
+        (
+            Target(
+                name=i.friendly_name or "?",
+                model=i.model_name or "?",
+                cast_type=i.cast_type or "?",
+                host=i.host,
+                port=i.port,
+                uuid=str(i.uuid),
+            )
+            for i in infos
+        ),
+        key=lambda t: (t.kind, t.name.lower()),
+    )
+
+
+class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorListener):
+    """Logs every player-state change, connection change and launch/load error, and
+    measures startup latency (play_media sent -> first PLAYING).
+
+    Callbacks run on pychromecast threads; `playing` is an asyncio.Event set via the loop.
+    """
+
+    def __init__(self, metrics: Metrics, target: str, loop: asyncio.AbstractEventLoop) -> None:
+        self._metrics = metrics
+        self._target = target
+        self._loop = loop
+        self._lock = threading.Lock()
+        self._last: tuple[str, str | None] | None = None
+        self._play_sent: float | None = None
+        self.seen_playing = False
+        self.startup_latency_s: float | None = None
+        self.playing = asyncio.Event()
+
+    def play_sent(self) -> None:
+        with self._lock:
+            self._play_sent = time.monotonic()
+            self.seen_playing = False
+            self._last = None
+        self._loop.call_soon_threadsafe(self.playing.clear)
+
+    def new_media_status(self, status: MediaStatus) -> None:
+        state = (status.player_state, status.idle_reason)
+        with self._lock:
+            if state == self._last:
+                return
+            self._last = state
+            first_playing = status.player_state == "PLAYING" and not self.seen_playing
+            if first_playing:
+                self.seen_playing = True
+                if self._play_sent is not None:
+                    self.startup_latency_s = round(time.monotonic() - self._play_sent, 3)
+            after_playing = self.seen_playing and not first_playing
+        self._metrics.event(
+            "cast_state",
+            target=self._target,
+            player_state=status.player_state,
+            idle_reason=status.idle_reason,
+            stream_type=status.stream_type,
+            content_id=status.content_id,
+            after_first_playing=after_playing,
+        )
+        if first_playing:
+            self._metrics.event(
+                "cast_startup", target=self._target, latency_s=self.startup_latency_s
+            )
+            self._loop.call_soon_threadsafe(self.playing.set)
+
+    def load_media_failed(self, queue_item_id: int, error_code: int) -> None:
+        self._metrics.event(
+            "cast_load_failed", target=self._target, item=queue_item_id, error_code=error_code
+        )
+
+    def new_connection_status(self, status: ConnectionStatus) -> None:
+        address = f"{status.address.address}:{status.address.port}" if status.address else None
+        self._metrics.event(
+            "cast_connection", target=self._target, status=status.status, address=address
+        )
+
+    def new_launch_error(self, status: LaunchFailure) -> None:
+        self._metrics.event(
+            "cast_launch_error", target=self._target, reason=status.reason, app_id=status.app_id
+        )
+
+
+class CastSession:
+    """One connection to a named device or group."""
+
+    def __init__(self, name: str, metrics: Metrics) -> None:
+        self.name = name
+        self._metrics = metrics
+        self._cast: pychromecast.Chromecast | None = None
+        self._browser: CastBrowser | None = None
+        self.monitor: StatusMonitor | None = None
+
+    def _connect_blocking(self) -> pychromecast.Chromecast:
+        casts, browser = pychromecast.get_listed_chromecasts(
+            friendly_names=[self.name], discovery_timeout=DISCOVERY_TIMEOUT_S * 2
+        )
+        self._browser = browser
+        if not casts:
+            seen = sorted(i.friendly_name or "?" for i in browser.devices.values())
+            browser.stop_discovery()
+            self._browser = None
+            raise CastError(
+                f"Cast target {self.name!r} not found. Seen: {', '.join(seen) or 'none'}"
+            )
+        cast = casts[0]
+        cast.wait(timeout=CONNECT_TIMEOUT_S)
+        return cast
+
+    async def connect(self) -> None:
+        loop = asyncio.get_running_loop()
+        self.monitor = StatusMonitor(self._metrics, self.name, loop)
+        started = time.monotonic()
+        self._cast = await asyncio.to_thread(self._connect_blocking)
+        info = self._cast.cast_info
+        self._cast.media_controller.register_status_listener(self.monitor)
+        self._cast.register_connection_listener(self.monitor)
+        self._cast.register_launch_error_listener(self.monitor)
+        self._metrics.event(
+            "cast_connected",
+            target=self.name,
+            model=info.model_name,
+            cast_type=info.cast_type,
+            host=info.host,
+            port=info.port,
+            connect_s=round(time.monotonic() - started, 2),
+        )
+
+    async def play(self, url: str, content_type: str) -> float | None:
+        """Send play_media and wait for the first PLAYING. Returns startup latency in seconds,
+        or None if PLAYING did not arrive within PLAYING_TIMEOUT_S."""
+        assert self._cast is not None and self.monitor is not None
+        self.monitor.play_sent()
+        self._metrics.event("cast_play_media", target=self.name, url=url, content_type=content_type)
+        await asyncio.to_thread(
+            self._cast.media_controller.play_media,
+            url,
+            content_type,
+            title=TITLE,
+            stream_type="LIVE",
+        )
+        try:
+            await asyncio.wait_for(self.monitor.playing.wait(), PLAYING_TIMEOUT_S)
+        except TimeoutError:
+            self._metrics.event(
+                "cast_startup_timeout", target=self.name, timeout_s=PLAYING_TIMEOUT_S
+            )
+            return None
+        return self.monitor.startup_latency_s
+
+    def _stop_blocking(self) -> None:
+        assert self._cast is not None
+        mc = self._cast.media_controller
+        mc.update_status()
+        mc.block_until_active(timeout=3)
+        if mc.status.media_session_id is not None:
+            with contextlib.suppress(Exception):
+                mc.stop()
+        self._cast.quit_app()
+
+    async def stop(self) -> None:
+        """Stop media and quit the receiver app."""
+        await asyncio.to_thread(self._stop_blocking)
+        self._metrics.event("cast_stop", target=self.name)
+
+    def _disconnect_blocking(self) -> None:
+        if self._cast is not None:
+            with contextlib.suppress(Exception):
+                self._cast.disconnect(timeout=5)
+        if self._browser is not None:
+            with contextlib.suppress(Exception):
+                self._browser.stop_discovery()
+
+    async def disconnect(self) -> None:
+        await asyncio.to_thread(self._disconnect_blocking)
+        self._cast = None
+        self._browser = None
+
+
+def target_dict(t: Target) -> dict[str, Any]:
+    return {"name": t.name, "kind": t.kind, "cast_type": t.cast_type, "model": t.model,
+            "host": t.host, "port": t.port}  # fmt: skip

@@ -64,7 +64,111 @@ def _serve(cfg: Config, args: argparse.Namespace) -> int:
     return asyncio.run(run_serve(cfg))
 
 
-IMPLEMENTED: dict[str, Callable[[Config, argparse.Namespace], int]] = {"serve": _serve}
+def _need_target(cfg: Config, command: str) -> bool:
+    if cfg.cast_target:
+        return True
+    print(f"{command}: no target; pass --to NAME or set cast_target", file=sys.stderr)
+    return False
+
+
+def _devices(cfg: Config, args: argparse.Namespace) -> int:
+    from vinylcast.cast import discover
+
+    targets = discover()
+    if not targets:
+        print("No Cast devices or groups found (same subnet? mDNS allowed?)", file=sys.stderr)
+        return 1
+    rows = [("NAME", "KIND", "CAST TYPE", "MODEL", "HOST:PORT")] + [
+        (t.name, t.kind, t.cast_type, t.model, f"{t.host}:{t.port}") for t in targets
+    ]
+    widths = [max(len(r[i]) for r in rows) for i in range(5)]
+    for r in rows:
+        print("  ".join(c.ljust(w) for c, w in zip(r, widths, strict=True)).rstrip())
+    return 0
+
+
+async def _cast_async(cfg: Config) -> int:
+    import dataclasses
+
+    import aiohttp
+
+    from vinylcast.cast import CastError, CastSession
+    from vinylcast.metrics import Metrics
+    from vinylcast.server import CONTENT_TYPES, stream_url
+
+    assert cfg.cast_target is not None
+    health_url = f"http://127.0.0.1:{cfg.http_port}/health"
+    try:
+        async with (
+            aiohttp.ClientSession() as s,
+            s.get(health_url, timeout=aiohttp.ClientTimeout(total=3)) as r,
+        ):
+            health = await r.json()
+    except (aiohttp.ClientError, TimeoutError) as e:
+        print(f"cast: no running server at {health_url} ({e}); start `vinylcast serve` first",
+              file=sys.stderr)  # fmt: skip
+        return 1
+    cfg = dataclasses.replace(cfg, codec=health["codec"])  # the running server decides
+    url = stream_url(cfg)
+    metrics = Metrics(cfg.metrics_path)
+    session = CastSession(cfg.cast_target, metrics)
+    try:
+        await session.connect()
+        latency = await session.play(url, CONTENT_TYPES[cfg.codec])
+    except CastError as e:
+        print(f"cast: {e}", file=sys.stderr)
+        return 1
+    finally:
+        await session.disconnect()
+        metrics.close()
+    if latency is None:
+        print(f"Sent {url} to {cfg.cast_target!r}, but it did not report PLAYING", file=sys.stderr)
+        return 1
+    print(f"Playing {url} on {cfg.cast_target!r} after {latency:.2f} s")
+    return 0
+
+
+def _cast(cfg: Config, args: argparse.Namespace) -> int:
+    return asyncio.run(_cast_async(cfg)) if _need_target(cfg, "cast") else 2
+
+
+async def _stop_async(cfg: Config) -> int:
+    from vinylcast.cast import CastError, CastSession
+    from vinylcast.metrics import Metrics
+
+    assert cfg.cast_target is not None
+    metrics = Metrics(cfg.metrics_path)
+    session = CastSession(cfg.cast_target, metrics)
+    try:
+        await session.connect()
+        await session.stop()
+    except CastError as e:
+        print(f"stop: {e}", file=sys.stderr)
+        return 1
+    finally:
+        await session.disconnect()
+        metrics.close()
+    print(f"Stopped playback on {cfg.cast_target!r}")
+    return 0
+
+
+def _stop(cfg: Config, args: argparse.Namespace) -> int:
+    return asyncio.run(_stop_async(cfg)) if _need_target(cfg, "stop") else 2
+
+
+def _run(cfg: Config, args: argparse.Namespace) -> int:
+    from vinylcast.service import run_cast
+
+    return asyncio.run(run_cast(cfg)) if _need_target(cfg, "run") else 2
+
+
+IMPLEMENTED: dict[str, Callable[[Config, argparse.Namespace], int]] = {
+    "serve": _serve,
+    "devices": _devices,
+    "cast": _cast,
+    "stop": _stop,
+    "run": _run,
+}
 
 COMMANDS: dict[str, tuple[str, str, bool]] = {
     # name: (help, milestone, takes --to)

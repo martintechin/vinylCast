@@ -87,12 +87,51 @@ async def run_serve(cfg: Config) -> int:
     service.metrics.event("service_start", config=cfg.__dict__)
     await service.start()
     print(f"Streaming at {stream_url(cfg)}  (Ctrl-C to stop)", flush=True)
+    try:
+        await _wait_for_signal()
+    finally:
+        await service.stop()
+    return 0
+
+
+async def _wait_for_signal() -> None:
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+
+async def run_cast(cfg: Config) -> int:
+    """`run`: serve + cast in one process. Keeps logging Cast state until SIGINT/SIGTERM,
+    then stops playback on the target and shuts down. Soak-test entry point."""
+    from vinylcast.cast import CastError, CastSession
+    from vinylcast.server import CONTENT_TYPES
+
+    assert cfg.cast_target is not None
+    service = Service(cfg)
+    service.metrics.event("service_start", config=cfg.__dict__, mode="run")
+    await service.start()
+    url = stream_url(cfg)
+    print(f"Streaming at {url}", flush=True)
+    session = CastSession(cfg.cast_target, service.metrics)
     try:
-        await stop.wait()
+        try:
+            await session.connect()
+        except CastError as e:
+            print(f"run: {e}", flush=True)
+            return 1
+        latency = await session.play(url, CONTENT_TYPES[cfg.codec])
+        if latency is None:
+            print(f"Sent to {cfg.cast_target!r}, but no PLAYING state yet; still logging "
+                  "(Ctrl-C to stop)", flush=True)  # fmt: skip
+        else:
+            print(f"Playing on {cfg.cast_target!r} after {latency:.2f} s  (Ctrl-C to stop)",
+                  flush=True)  # fmt: skip
+        await _wait_for_signal()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(session.stop(), 15)
+        return 0
     finally:
+        await session.disconnect()
         await service.stop()
-    return 0

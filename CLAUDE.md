@@ -71,11 +71,17 @@ audio path (one encoder, one hub; a new client costs a queue, not an encode)
   server.py   aiohttp GET/HEAD /stream.mp3 | /stream.flac, /health; logs all requests
       ^
       |  HTTP pull
-  Cast receiver  <--- play_media(url with Pi's LAN IP) ---  cast.py [M3]
+  Cast receiver  <--- play_media(url with Pi's LAN IP) ---  cast.py
 
 control: cli.py -> service.py (wires encoder -> hub -> server + sampler) -> config.py
 metrics.py records events + 5 s samples (JSONL)
 ```
+
+cast.py wraps pychromecast 14.1.1, which is synchronous and threaded: blocking calls go through
+`asyncio.to_thread`, listener callbacks arrive on pychromecast threads (Metrics is locked for this).
+`cast` and `stop` are separate short-lived processes appending to the same metrics file; `run` is
+serve + cast in one process and the soak-test entry point. Cast events: `cast_state` (every player
+state change, with `after_first_playing`), `cast_startup` (latency), `cast_connection`, errors.
 
 Slow-client detection depends on server.py limiting per-connection socket buffering
 (SO_SNDBUF + transport high-water mark); without it Linux absorbs ~100 s of audio per

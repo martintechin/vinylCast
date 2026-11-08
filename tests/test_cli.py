@@ -17,7 +17,7 @@ def test_help_lists_all_subcommands() -> None:
 
 
 def test_stub_returns_not_implemented(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["devices"]) == EXIT_NOT_IMPLEMENTED
+    assert main(["levels"]) == EXIT_NOT_IMPLEMENTED
     assert "not implemented" in capsys.readouterr().err
 
 
