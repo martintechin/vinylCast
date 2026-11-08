@@ -221,7 +221,9 @@ commit per milestone, hardware checks run by Martin with exact commands.
    - Unit tests: state machine (fake clock/cast), detector hysteresis, state file round-trip
    - On the Pi: `vinylcast run` behaves as in the PoC; codec switch while playing re-casts
      within 6 s
-2. **R2 – Web API + events.** web.py, continuous discovery, volume.
+2. **R2 – Web API + events.** — **done 2026-11-08** (Pi: play/volume/stop/settings via
+   PowerShell; codec switch while playing 2.05 s MP3→FLAC, 2.45 s FLAC→MP3; SSE verified in
+   tests, Pi output not reported) web.py, continuous discovery, volume.
    - API tests via aiohttp test client; SSE delivers levels ≥ 4 Hz and state changes < 0.5 s
    - On the Pi: `curl` play/stop/volume/settings work against a real speaker
 3. **R3 – Phone UI.**
