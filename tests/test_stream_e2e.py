@@ -101,7 +101,7 @@ async def test_restart_keeps_clients_and_header(svc: Service, tmp_path: Path) ->
 
 @pytest.fixture
 async def svc_peaks(tmp_path: Path) -> AsyncIterator[Service]:
-    cfg = load_config(overrides={"source": "tone", "peak_log_s": 1,
+    cfg = load_config(overrides={"source": "tone", "measure_levels": True, "peak_log_s": 1,
                                  "metrics_path": str(tmp_path / "m.jsonl")})  # fmt: skip
     service = Service(cfg, sample_interval_s=0.5)
     service.port = await service.start(port=0)  # type: ignore[attr-defined]
@@ -119,4 +119,6 @@ async def test_stream_with_peak_logging(svc_peaks: Service, tmp_path: Path) -> N
     path = Path(svc_peaks.cfg.metrics_path)
     peaks = events(path, "input_peak")
     assert len(peaks) >= 2 and peaks[0]["peak_db"] == pytest.approx(-18.06, abs=0.1)
+    assert peaks[0]["readings"] >= 9  # ~10 readings/s (100 ms blocks)
+    assert svc_peaks.latest_level is not None
     assert events(path, "encoder_restart") == [] and events(path, "ffmpeg_warning") == []

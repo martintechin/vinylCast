@@ -98,3 +98,18 @@ def test_levels_bad_device_fails_cleanly() -> None:
         capture_output=True, text=True, timeout=30,
     )  # fmt: skip
     assert out.returncode == 1 and "no readings" in out.stdout
+
+
+def test_level_reader_stereo_and_mono() -> None:
+    from vinylcast.levels import LevelReader
+
+    t = iter(range(100))
+    reader = LevelReader(clock=lambda: float(next(t)))
+    out = [lv for line in SAMPLE if (lv := reader.feed(line)) is not None]
+    # Stereo block 0 completes on its 4th value; block 1 also has four values.
+    assert [(lv.rms_db, lv.peak_db) for lv in out] == [(-9.2, -0.5), (-math.inf, -math.inf)]
+    mono = [P + "frame:0 pts:0 pts_time:0", P + "lavfi.astats.1.Peak_level=-18.0",
+            P + "lavfi.astats.1.RMS_level=-21.0", P + "frame:1 pts:4410 pts_time:0.1"]  # fmt: skip
+    reader = LevelReader(clock=lambda: 1.0)
+    got = [lv for line in mono if (lv := reader.feed(line)) is not None]
+    assert [(lv.rms_db, lv.peak_db) for lv in got] == [(-21.0, -18.0)]  # completed by next frame

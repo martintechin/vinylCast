@@ -31,6 +31,8 @@ def _common_parser() -> argparse.ArgumentParser:
     g.add_argument("--http-port", type=int)
     g.add_argument("--advertise-ip", help='IP for the stream URL, or "auto"')
     g.add_argument("--client-max-buffer-s", type=float)
+    g.add_argument("--measure-levels", action=argparse.BooleanOptionalAction,
+                   help="measure input levels in the encoder (100 ms blocks)")  # fmt: skip
     g.add_argument("--peak-log-s", type=float, help="log input peak every N s (0 = off)")
     g.add_argument("--auto-cast", action=argparse.BooleanOptionalAction)
     g.add_argument("--detect-threshold-db", type=float)
@@ -53,6 +55,7 @@ CONFIG_KEYS = (
     "http_port",
     "advertise_ip",
     "client_max_buffer_s",
+    "measure_levels",
     "peak_log_s",
     "metrics_path",
     "auto_cast",

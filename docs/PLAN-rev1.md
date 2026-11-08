@@ -119,6 +119,20 @@ variants tried. R0 tests, on the Pi, in this order:
 
 The first option that keeps the stream intact for 10 minutes with correct levels is used.
 
+**R0 result (Martin's Pi, ffmpeg 7.1.5, 60 s per variant, record playing):**
+
+| Variant | Stream | Readings/s | ffmpeg CPU |
+| --- | --- | --- | --- |
+| baseline (no measurement) | OK 40/40 kB/s | – | 29.2 % |
+| A1 inline astats per frame | OK | 506.8 | 58.3 % |
+| **A2 inline asetnsamples 100 ms + astats** | **OK** | **10.0** | **30.7 %** |
+| A3 inline silencedetect | OK | – | 28.7 % |
+| B1 asplit, per frame, own null output | OK | 506.8 | 66.0 % |
+| control: asplit + 10 s blocks (PoC peak logging) | **stalled** ("buffers queued") | 0.1 | 245.7 % |
+
+**Decision: A2** (inline, 100 ms). No Python-side fallback needed. Cost: +1.5 % CPU and up
+to ~0.1 s added latency. Remaining R0 check: 10 min on a speaker with `measure_levels` on.
+
 ### detector.py
 
 - Input: level samples (dBFS, both channels) at ≥ 4 Hz; output: `signal_on` / `signal_off` with

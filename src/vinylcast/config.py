@@ -31,8 +31,10 @@ class Config:
     advertise_ip: str | None = None  # None = auto-detect from the default route
     cast_target: str | None = None
     client_max_buffer_s: float = 10.0
-    # Input peak logged every N s by the encoder's ffmpeg; 0 = off. Off by default: on the
-    # Pi's ffmpeg 7 both variants tried so far silenced the stream (works on ffmpeg 6.1).
+    # Level measurement inline in the encoder's ffmpeg (100 ms blocks, R0 variant A2: passed
+    # 60 s on the Pi's ffmpeg 7, +1.5 % CPU). Off until the 10-min speaker check passes.
+    measure_levels: bool = False
+    # Log the input peak every N s (needs measure_levels); 0 = off.
     peak_log_s: float = 0.0
     metrics_path: str = "./metrics.jsonl"  # strftime codes allowed, e.g. soak-%Y%m%d-%H%M.jsonl
     # Revision 1: auto-cast on needle drop (docs/PLAN-rev1.md)
@@ -60,6 +62,7 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "advertise_ip": (str,),
     "cast_target": (str,),
     "client_max_buffer_s": (int, float),
+    "measure_levels": (bool,),
     "peak_log_s": (int, float),
     "metrics_path": (str,),
     "auto_cast": (bool,),

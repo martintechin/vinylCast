@@ -47,40 +47,33 @@ def codec_args(cfg: Config) -> list[str]:
     raise ValueError(f"unknown codec {cfg.codec!r}")
 
 
-def peak_graph(cfg: Config) -> str | None:
-    """Filter graph that splits the input: `[enc]` feeds the encoder unchanged, `[peak]`
-    measures the input peak per `peak_log_s` block. Results are info-level log lines
-    ("[info] lavfi.astats.N.Peak_level=..."), parsed by levels.PeakLogger.
+LEVEL_BLOCK_S = 0.1
 
-    The measuring branch ends in its own `-f null` output. An in-graph `anullsink` (the
-    first version) makes ffmpeg 7's scheduler abort ("Assertion best_input >= 0 failed",
-    "100 buffers queued in out_#0:0") with no audio out (found on Martin's Pi).
+
+def level_filter_args(cfg: Config) -> list[str]:
+    """Inline level measurement on the encoder path (R0 decision, variant A2): 100 ms blocks,
+    peak + RMS per channel, printed as info-level log lines and parsed by levels.LevelReader.
+
+    Inline on purpose. A measuring branch split off with asplit stalls the stream on ffmpeg 7
+    when it collects long blocks ("buffers queued in out_#0:0", Martin's Pi); per-frame
+    measurement without blocks gives ~500 readings/s on the Pi's ALSA input and doubles CPU.
     """
-    if cfg.peak_log_s <= 0:
-        return None
-    block = max(1, round(cfg.sample_rate * cfg.peak_log_s))
-    return (
-        "[0:a]asplit=2[enc][m];"
-        f"[m]asetnsamples=n={block}:p=0,"
-        "astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"
-        "ametadata=mode=print[peak]"
-    )
+    if not cfg.measure_levels:
+        return []
+    block = max(1, round(cfg.sample_rate * LEVEL_BLOCK_S))
+    return ["-af", f"asetnsamples=n={block}:p=0,"
+            "astats=metadata=1:reset=1:measure_perchannel=Peak_level+RMS_level"
+            ":measure_overall=none,ametadata=mode=print"]  # fmt: skip
 
 
 def build_command(cfg: Config, ffmpeg: str = "ffmpeg") -> list[str]:
     # level+info: every log line carries "[info]" / "[warning]" / "[error]" so warnings can be
-    # told apart from the info-level peak lines.
-    cmd = [ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "level+info",
-           *source.input_args(cfg)]  # fmt: skip
-    graph = peak_graph(cfg)
-    if graph:
-        cmd += ["-filter_complex", graph, "-map", "[enc]"]
-    # Output 1: the stream (options before pipe:1 apply to this output only).
-    cmd += [*source.output_args(cfg), *codec_args(cfg), "pipe:1"]
-    if graph:
-        # Output 2: discard the measuring branch; only its log lines matter.
-        cmd += ["-map", "[peak]", "-f", "null", "-"]
-    return cmd
+    # told apart from the info-level level lines.
+    return [
+        ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "level+info",
+        *source.input_args(cfg), *level_filter_args(cfg), *source.output_args(cfg),
+        *codec_args(cfg), "pipe:1",
+    ]  # fmt: skip
 
 
 class EncoderState(StrEnum):
@@ -113,7 +106,7 @@ class Encoder:
         self._stable_after_s = stable_after_s
         self._chunk_size = chunk_size
         self._on_start = on_start
-        self._on_info = on_info  # info-level ffmpeg lines (peak measurements)
+        self._on_info = on_info  # info-level ffmpeg lines (level measurements)
         self._proc: asyncio.subprocess.Process | None = None
         self._stopping = asyncio.Event()
         self.state = EncoderState.IDLE

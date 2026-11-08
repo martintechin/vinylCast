@@ -12,10 +12,11 @@ import sys
 from typing import Any
 
 from vinylcast.config import Config
+from vinylcast.detector import Level
 from vinylcast.encoder import Encoder, build_command
 from vinylcast.framing import make_framer
 from vinylcast.hub import Hub
-from vinylcast.levels import PeakLogger
+from vinylcast.levels import LevelReader, PeakLogger
 from vinylcast.metrics import Metrics, PiHealth, Sampler
 from vinylcast.server import StreamServer, stream_url
 
@@ -26,13 +27,15 @@ class Service:
         self.metrics = Metrics(cfg.metrics_path)
         self.hub = Hub(cfg.client_max_buffer_s, self.metrics)
         self.framer = make_framer(cfg.codec, self._on_flac_header)
-        self.peaks = PeakLogger(self.metrics)
+        self.level_reader = LevelReader()
+        self.peaks = PeakLogger(self.metrics, cfg.peak_log_s)
+        self.latest_level: Level | None = None
         self.encoder = Encoder(
             build_command(cfg),
             self._on_chunk,
             self.metrics,
             on_start=self._on_encoder_start,
-            on_info=self.peaks.feed,
+            on_info=self._on_ffmpeg_info,
             **encoder_kw,
         )
         self.server = StreamServer(
@@ -55,7 +58,14 @@ class Service:
 
     def _on_encoder_start(self) -> None:
         self.framer.reset()
+        self.level_reader.reset()
         self.peaks.flush()
+
+    def _on_ffmpeg_info(self, line: str) -> None:
+        level = self.level_reader.feed(line)
+        if level is not None:
+            self.latest_level = level
+            self.peaks.add(level)
 
     def _on_flac_header(self, header: bytes, old: bytes | None) -> None:
         if old is None:

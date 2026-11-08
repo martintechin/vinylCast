@@ -13,11 +13,13 @@ import math
 import re
 import signal
 import sys
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 
 from vinylcast import source
 from vinylcast.config import Config
+from vinylcast.detector import Level
 from vinylcast.metrics import Metrics
 
 CLIP_WARN_DBFS = -1.0
@@ -175,32 +177,67 @@ async def run_levels(cfg: Config, duration_s: float | None = None) -> int:
     return 0
 
 
-class PeakLogger:
-    """Turns the encoder's info-level peak lines into `input_peak` events, one per block.
-    A block is emitted when the next block's frame line arrives (the last block of a
-    process is dropped; at 10 s blocks that is irrelevant for a soak summary)."""
+class LevelReader:
+    """Parses the encoder's measurement lines (one block = a frame line + peak/RMS per channel)
+    into detector Levels. A block is complete when the next frame line arrives or, for
+    stereo, as soon as all four values are in."""
 
-    def __init__(self, metrics: Metrics) -> None:
-        self._metrics = metrics
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self._clock = clock
         self._pending: list[str] = []
 
-    def feed(self, line: str) -> None:
+    def reset(self) -> None:
+        self._pending = []
+
+    def feed(self, line: str) -> Level | None:
         if _FRAME.search(line):
-            self.flush()
+            done = self._complete()
             self._pending = [line]
-        elif _STAT.search(line) and self._pending:
+            return done
+        if _STAT.search(line) and self._pending:
             self._pending.append(line)
+            if len(self._pending) == 5:
+                return self._complete()
+        return None
+
+    def _complete(self) -> Level | None:
+        lines, self._pending = self._pending, []
+        if len(lines) < 2:
+            return None
+        r = from_block(lines)
+        rms = max(r.rms.values(), default=-math.inf)
+        return Level(self._clock(), rms, r.max_peak)
+
+
+class PeakLogger:
+    """Aggregates level readings into one `input_peak` event per `interval_s`."""
+
+    def __init__(self, metrics: Metrics, interval_s: float) -> None:
+        self._metrics = metrics
+        self._interval_s = interval_s
+        self._start: float | None = None
+        self._peak = -math.inf
+        self._over = 0
+        self._count = 0
+
+    def add(self, level: Level) -> None:
+        if self._interval_s <= 0:
+            return
+        if self._start is None:
+            self._start = level.t
+        self._peak = max(self._peak, level.peak_db)
+        self._over += level.peak_db > CLIP_WARN_DBFS
+        self._count += 1
+        if level.t - self._start >= self._interval_s:
+            self.flush()
 
     def flush(self) -> None:
-        if len(self._pending) > 1:
-            r = from_block(self._pending)
+        if self._count:
             self._metrics.event(
                 "input_peak",
-                t=r.t,
-                peak_db=None if r.max_peak == -math.inf else round(r.max_peak, 2),
-                channels={
-                    str(c): (None if v == -math.inf else round(v, 2)) for c, v in r.peak.items()
-                },
-                clip_risk=r.clipping_risk,
+                peak_db=None if self._peak == -math.inf else round(self._peak, 2),
+                readings=self._count,
+                readings_above_clip=self._over,
+                clip_risk=self._over > 0,
             )
-        self._pending = []
+        self._start, self._peak, self._over, self._count = None, -math.inf, 0, 0

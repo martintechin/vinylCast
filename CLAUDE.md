@@ -106,11 +106,13 @@ Pi (measured): Raspberry Pi 3 Model B Rev 1.2 -> Wi-Fi 2.4 GHz only. It runs on 
 Ethernet at the turntable; Martin's decision, deviating from PLAN.md's Ethernet-first soak), so
 M5 logs `health` records every 60 s (get_throttled, Wi-Fi signal/bitrate/power save) and the
 summary counts kernel "Data may have been lost" USB messages, to separate USB-capture from
-Wi-Fi problems. Optional peak logging (`peak_log_s`, default 0 = off) measures input peaks in
-an asplit branch of the encoder's ffmpeg (`input_peak` events). It is OFF because on the Pi's
-ffmpeg 7 both variants tried (in-graph anullsink; separate `-f null` output) gave no audio;
-fine on ffmpeg 6.1. Never re-enable by default without a passing run on the Pi. The encoder
-logs at `level+info`: only warning/error lines become
+Wi-Fi problems. Level measurement (R0 decision, `measure_levels`): an INLINE chain on the
+encoder path, `asetnsamples` 100 ms + `astats` + `ametadata=print` (10 readings/s, +1.5 % CPU on
+the Pi). Never use an `asplit` branch with long blocks: on the Pi's ffmpeg 7 it stalls the stream
+("buffers queued in out_#0:0"), proven by scripts/spike_measure.py's control variant. Per-frame
+astats without blocks gives ~500 readings/s there and doubles CPU. `levels.LevelReader` turns
+the lines into `detector.Level`s; `PeakLogger` aggregates them (`peak_log_s`). MP3 320k encoding
+alone costs ~29 % of one Pi 3 core. The encoder logs at `level+info`: only warning/error lines become
 `ffmpeg_warning`/`ffmpeg_xrun`; info lines go to `on_info`; stderr is ignored once we stop it.
 ffmpeg runs in its own session and is stopped SIGTERM -> SIGKILL (clean ALSA close).
 
