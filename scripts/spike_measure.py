@@ -217,6 +217,18 @@ def main() -> int:
     if args.noise_floor:
         noise_floor(cfg, min(args.seconds, 10.0))
         return 0
+    if args.source == "alsa":
+        probe = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-t", "0.5", *input_args(cfg),
+             "-f", "null", "-"],
+            capture_output=True, text=True,
+        )  # fmt: skip
+        if probe.returncode != 0:
+            print("Cannot open the input, nothing measured:")
+            print("  " + (probe.stderr.strip().splitlines() or ["?"])[0])
+            print("Is the service still running? sudo systemctl stop vinylcast; "
+                  "systemctl is-active vinylcast must say 'inactive'.")  # fmt: skip
+            return 2
     chosen = variants(cfg)
     if args.only:
         chosen = {k: v for k, v in chosen.items() if k in args.only.split(",")}
