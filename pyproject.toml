@@ -44,6 +44,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 "tests/**" = ["ASYNC"]
 # Verbatim JSONL from a Pi run.
 "tests/test_soak.py" = ["ASYNC", "E501"]
+"tests/test_autocast_report.py" = ["ASYNC", "E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

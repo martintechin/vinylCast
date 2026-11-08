@@ -1,6 +1,7 @@
 # VinylCast systemd unit (template). scripts/deploy.sh fills in @USER@ and @DIR@ and installs
-# it as /etc/systemd/system/vinylcast.service. Runs `vinylcast run` with vinylcast.toml, which
-# must set cast_target.
+# it as /etc/systemd/system/vinylcast.service. Runs `vinylcast daemon` (revision 1: always
+# listening, casts to the last speaker on needle drop, phone UI at http://<pi>:8800/) with
+# vinylcast.toml. cast_target is only the fallback speaker until one is chosen in the UI.
 [Unit]
 Description=VinylCast: turntable to Cast stream
 Wants=network-online.target
@@ -11,14 +12,14 @@ Type=simple
 User=@USER@
 SupplementaryGroups=audio
 WorkingDirectory=@DIR@
-ExecStart=@DIR@/.venv/bin/vinylcast run --config @DIR@/vinylcast.toml
+ExecStart=@DIR@/.venv/bin/vinylcast daemon --config @DIR@/vinylcast.toml
 Environment=PYTHONUNBUFFERED=1
-# SIGINT = the same clean shutdown as Ctrl-C: stops playback on the target, then ffmpeg.
+# SIGINT = the same clean shutdown as Ctrl-C: stops playback on the speaker, then ffmpeg.
 KillSignal=SIGINT
 # Signal only the main process; it stops ffmpeg itself (the rest gets SIGKILL on timeout).
 KillMode=mixed
 TimeoutStopSec=25
-# Retry e.g. a target not yet reachable after boot; exit 2 is a config error, so don't loop.
+# Retry e.g. the port still in use after a restart; exit 2 is a config error, so don't loop.
 Restart=on-failure
 RestartSec=10
 RestartPreventExitStatus=2

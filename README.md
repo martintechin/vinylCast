@@ -16,6 +16,7 @@ single device (Nest Mini); group checks open (no group yet).
 sudo systemctl start vinylcast        # play for 60+ min; note audible gaps with times
 sudo systemctl stop vinylcast
 python scripts/soak_summary.py soak-*.jsonl   # PASS/FAIL against PLAN.md M5
+python scripts/r4_summary.py soak-*.jsonl     # needle-drop cycles, R4 criteria
 ```
 
 ## On the Pi
@@ -24,7 +25,8 @@ python scripts/soak_summary.py soak-*.jsonl   # PASS/FAIL against PLAN.md M5
 scripts/deploy.sh                 # git pull, venv + install, vinylcast.toml, systemd unit
 vinylcast levels                  # live dBFS from the UFO202; keep peaks below -1 dBFS
 vinylcast run --to "<device>"     # vinyl to Cast (source defaults to alsa)
-sudo systemctl start vinylcast    # unattended, using vinylcast.toml (needs cast_target)
+sudo systemctl start vinylcast    # `vinylcast daemon` with vinylcast.toml: phone UI on :8800,
+                                  # casts to the last speaker on needle drop
 journalctl -u vinylcast -f
 ``` `serve` streams MP3 or FLAC from the
 `tone`, `file` or `alsa` source; `devices`, `cast`, `stop` and `run` control Cast devices and groups.

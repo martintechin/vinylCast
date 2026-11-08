@@ -107,7 +107,8 @@ state change, with `after_first_playing`), `cast_startup` (latency), `cast_conne
 UFO202 (measured): card CODEC, USB full speed, native capture S16_LE stereo at 48000/44100/32000/
 22050/16000/11025 Hz. Default device is `hw:CARD=CODEC,DEV=0` (not plughw) so an unsupported
 rate fails instead of being resampled by ALSA. The systemd unit (deploy/vinylcast.service, a
-template filled by deploy.sh) runs `vinylcast run --config vinylcast.toml` and stops with SIGINT.
+template filled by deploy.sh) runs `vinylcast daemon --config vinylcast.toml` (since R4; before:
+`run`) and stops with SIGINT. R4 evaluation: `python scripts/r4_summary.py FILE.jsonl`.
 
 Pi (measured): Raspberry Pi 3 Model B Rev 1.2 -> Wi-Fi 2.4 GHz only. It runs on Wi-Fi (no
 Ethernet at the turntable; Martin's decision, deviating from PLAN.md's Ethernet-first soak), so
