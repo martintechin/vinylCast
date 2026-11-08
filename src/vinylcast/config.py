@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 SOURCES = ("alsa", "tone", "file")
+LOG_LEVELS = ("warning", "info", "debug")
 CODECS = ("mp3", "flac")
 
 
@@ -37,6 +38,7 @@ class Config:
     # Log the input peak every N s (needs measure_levels); 0 = off.
     peak_log_s: float = 10.0
     metrics_path: str = "./metrics.jsonl"  # strftime codes allowed, e.g. soak-%Y%m%d-%H%M.jsonl
+    log_level: str = "info"  # console/journal: "warning" | "info" | "debug" (metrics file: all)
     # Revision 1: auto-cast on needle drop (docs/PLAN-rev1.md)
     auto_cast: bool = True
     # RMS dBFS (R0 noise floor, Martin's Pi): music -34..-25, groove noise up to -46/-50,
@@ -67,6 +69,7 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "measure_levels": (bool,),
     "peak_log_s": (int, float),
     "metrics_path": (str,),
+    "log_level": (str,),
     "auto_cast": (bool,),
     "detect_threshold_db": (int, float),
     "detect_on_s": (int, float),
@@ -110,6 +113,8 @@ def _coerce(values: dict[str, Any], origin: str) -> dict[str, Any]:
 def _validate(cfg: Config) -> None:
     if cfg.source not in SOURCES:
         raise ConfigError(f"source must be one of {SOURCES}, got {cfg.source!r}")
+    if cfg.log_level not in LOG_LEVELS:
+        raise ConfigError(f"log_level must be one of {LOG_LEVELS}, got {cfg.log_level!r}")
     if cfg.codec not in CODECS:
         raise ConfigError(f"codec must be one of {CODECS}, got {cfg.codec!r}")
     if cfg.source == "file" and not cfg.source_file:

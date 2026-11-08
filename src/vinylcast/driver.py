@@ -108,6 +108,13 @@ class Driver:
 
     # ------------------------------------------------------------- commands (UI / CLI)
 
+    def set_target(self, target: str) -> None:
+        """Choose the speaker for the next needle drop without starting playback."""
+        self.controller.set_target(target)
+        self.state.last_target = target
+        self._save()
+        self.metrics.event("target_set", target=target)
+
     def play(self, target: str | None = None) -> None:
         self._apply(self.controller.play(self._clock(), target))
 

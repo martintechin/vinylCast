@@ -43,3 +43,20 @@ def test_invalid_config_is_usage_error() -> None:
     with pytest.raises(SystemExit) as e:
         main(["serve", "--http-port", "0"])
     assert e.value.code == 2
+
+
+def test_routine_events_only_at_debug(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    import logging
+
+    from vinylcast.metrics import Metrics
+
+    m = Metrics(tmp_path / "m.jsonl")
+    with caplog.at_level(logging.INFO, logger="vinylcast"):
+        m.event("input_peak", peak_db=-17.49)
+        m.event("encoder_start", pid=1)
+    assert [r.message.split()[0] for r in caplog.records] == ["encoder_start"]
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="vinylcast"):
+        m.event("input_peak", peak_db=-17.49)
+    assert caplog.records[0].message.startswith("input_peak")
+    assert (tmp_path / "m.jsonl").read_text().count("input_peak") == 2  # file gets all

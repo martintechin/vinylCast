@@ -48,6 +48,11 @@ peak_log_s = 10
 # file is opened, e.g. "./soak-%Y%m%d-%H%M.jsonl".
 metrics_path = "./metrics.jsonl"
 
+# Console / journalctl detail: "warning", "info" or "debug". "debug" adds routine events such
+# as input_peak (every peak_log_s) and http_request (all headers). The metrics file always
+# records everything.
+log_level = "info"
+
 # --- Revision 1: auto-cast on needle drop (docs/PLAN-rev1.md) ---
 # The web UI may change auto_cast, the detection settings, codec and mp3_bitrate; its changes
 # are stored in state.json and override this file (command-line flags override both).

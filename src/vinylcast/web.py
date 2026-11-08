@@ -6,6 +6,7 @@ LAN only, no authentication (decided for revision 1). Endpoints:
   GET  /api/devices       live Cast devices and groups (continuous discovery)
   POST /api/play          {"target": "<name>"}? -> manual play (sets the last speaker)
   POST /api/stop          manual stop (holds auto-cast until the record ends)
+  POST /api/target        {"target": "<name>"} -> speaker for the next needle drop (no play)
   POST /api/volume        {"level": 0..1} -> speaker volume
   GET  /api/settings      settings the UI may change, with current values
   POST /api/settings      {key: value, ...} -> validated, saved to state.json, applied
@@ -20,6 +21,7 @@ import contextlib
 import json
 import time
 from collections.abc import Callable
+from importlib import resources
 from typing import Any
 
 from aiohttp import web
@@ -30,6 +32,7 @@ from vinylcast.driver import Driver
 from vinylcast.server import stream_url
 
 LEVEL_INTERVAL_S = 0.25  # 4 Hz for the meter
+INDEX_HTML = (resources.files("vinylcast") / "webui" / "index.html").read_bytes()
 HEARTBEAT_S = 15.0
 
 
@@ -64,10 +67,12 @@ class WebApi:
 
     def install(self, app: web.Application) -> None:
         r = app.router
+        r.add_get("/", self.index)
         r.add_get("/api/status", self.status)
         r.add_get("/api/devices", self.list_devices)
         r.add_post("/api/play", self.play)
         r.add_post("/api/stop", self.stop)
+        r.add_post("/api/target", self.target)
         r.add_post("/api/volume", self.volume)
         r.add_get("/api/settings", self.get_settings)
         r.add_post("/api/settings", self.post_settings)
@@ -94,6 +99,11 @@ class WebApi:
 
     # ------------------------------------------------------------- handlers
 
+    async def index(self, request: web.Request) -> web.Response:
+        """The phone UI: one self-contained HTML file (no external resources)."""
+        return web.Response(body=INDEX_HTML, content_type="text/html", charset="utf-8",
+                            headers={"Cache-Control": "no-cache"})  # fmt: skip
+
     async def status(self, request: web.Request) -> web.Response:
         return _json(self.snapshot())
 
@@ -112,6 +122,13 @@ class WebApi:
             return _error("target must be a string")
         self.driver.play(target)
         return _json(self.snapshot(), 202)
+
+    async def target(self, request: web.Request) -> web.Response:
+        name = (await _body(request)).get("target")
+        if not isinstance(name, str) or not name.strip():
+            return _error("target must be a speaker name")
+        self.driver.set_target(name)
+        return _json(self.snapshot())
 
     async def stop(self, request: web.Request) -> web.Response:
         self.driver.stop()

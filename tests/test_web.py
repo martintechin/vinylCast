@@ -151,3 +151,20 @@ async def test_diagnostics(api: Api) -> None:
     assert {"health", "sample", "notifications", "events"} <= d.keys()
     assert not any(e.get("event") == "http_request" and e.get("method") == "GET"
                    for e in d["events"])  # fmt: skip
+
+
+async def test_index_page_served(api: Api) -> None:
+    async with aiohttp.ClientSession() as s, s.get(f"{api.base}/") as r:
+        assert r.status == 200 and r.headers["Content-Type"].startswith("text/html")
+        assert r.headers["Cache-Control"] == "no-cache"
+        html = await r.text()
+    assert "<title>VinylCast</title>" in html and 'new EventSource("/api/events")' in html
+    assert "http://" not in html.split("<script>")[1] and "https://" not in html  # no externals
+
+
+async def test_choose_speaker_without_playing(api: Api) -> None:
+    code, st = await post(f"{api.base}/api/target", {"target": "Tvättstugan"})
+    assert code == 200 and st["target"] == "Tvättstugan" and st["state"] == "idle"  # type: ignore[index]
+    assert api.store.load().last_target == "Tvättstugan"
+    assert not any(e.startswith("play") for e in api.log)
+    assert (await post(f"{api.base}/api/target", {"target": ""}))[0] == 400

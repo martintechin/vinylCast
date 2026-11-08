@@ -34,6 +34,8 @@ def _common_parser() -> argparse.ArgumentParser:
     g.add_argument("--measure-levels", action=argparse.BooleanOptionalAction,
                    help="measure input levels in the encoder (100 ms blocks)")  # fmt: skip
     g.add_argument("--peak-log-s", type=float, help="log input peak every N s (0 = off)")
+    g.add_argument("--log-level", choices=("warning", "info", "debug"),
+                   help="console/journal detail; metrics file gets everything")  # fmt: skip
     g.add_argument("--auto-cast", action=argparse.BooleanOptionalAction)
     g.add_argument("--detect-threshold-db", type=float)
     g.add_argument("--detect-on-s", type=float)
@@ -58,6 +60,7 @@ CONFIG_KEYS = (
     "measure_levels",
     "peak_log_s",
     "metrics_path",
+    "log_level",
     "auto_cast",
     "detect_threshold_db",
     "detect_on_s",
@@ -254,4 +257,5 @@ def main(argv: Sequence[str] | None = None) -> int:
         cfg = config_from_args(args)
     except ConfigError as e:
         parser.error(str(e))
+    logging.getLogger().setLevel(cfg.log_level.upper())
     return args.handler(cfg, args)

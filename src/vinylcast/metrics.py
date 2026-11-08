@@ -22,6 +22,9 @@ import psutil
 
 log = logging.getLogger("vinylcast")
 
+# Periodic or very detailed events: logged to the console only at log_level "debug".
+DEBUG_EVENTS = frozenset({"input_peak", "http_request"})
+
 
 class Metrics:
     def __init__(self, path: str | Path | None) -> None:
@@ -44,7 +47,11 @@ class Metrics:
 
     def event(self, name: str, **fields: Any) -> None:
         self._write({"ts": round(time.time(), 3), "kind": "event", "event": name, **fields})
-        log.info("%s %s", name, " ".join(f"{k}={v}" for k, v in fields.items()))
+        # Every event goes to the JSONL file; the console/journal shows routine ones only at
+        # log_level = "debug" (Martin: input_peak every 10 s is noise in the live log).
+        level = logging.DEBUG if name in DEBUG_EVENTS else logging.INFO
+        if log.isEnabledFor(level):
+            log.log(level, "%s %s", name, " ".join(f"{k}={v}" for k, v in fields.items()))
 
     def sample(self, **fields: Any) -> None:
         self.write_record("sample", **fields)

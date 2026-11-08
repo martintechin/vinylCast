@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1b1d22">
+<title>VinylCast</title>
+<style>
+  :root {
+    --bg: #f4f2ee; --card: #ffffff; --text: #1d1d1f; --muted: #6b6b70; --line: #e3e0da;
+    --accent: #c2410c; --accent-text: #ffffff; --ok: #15803d; --warn: #b45309; --err: #b91c1c;
+    --meter-bg: #ece9e3; --rms: #c2410c; --peak: #f59e0b; --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121317; --card: #1b1d22; --text: #ececf0; --muted: #9a9aa3; --line: #2a2d34;
+      --accent: #fb923c; --accent-text: #1b1d22; --ok: #4ade80; --warn: #fbbf24; --err: #f87171;
+      --meter-bg: #262930; --rms: #fb923c; --peak: #fcd34d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: max(12px, env(safe-area-inset-top)) 16px 32px;
+  }
+  header { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 12px; }
+  h1 { font-size: 22px; margin: 0; letter-spacing: .2px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+       margin: 0 0 10px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); display: inline-block; }
+  .dot.on { background: var(--ok); }
+  .conn { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+          padding: 16px; margin-bottom: 12px; }
+  .state { font-size: 22px; font-weight: 650; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0; }
+  .note { margin-top: 10px; padding: 10px 12px; border-radius: 10px; font-size: 14px;
+          background: var(--meter-bg); display: none; }
+  .note.warning { display: block; border-left: 4px solid var(--warn); }
+  .note.error { display: block; border-left: 4px solid var(--err); }
+  .note.info { display: block; border-left: 4px solid var(--muted); }
+  .row { display: flex; gap: 10px; margin-top: 14px; }
+  button {
+    font: inherit; font-weight: 600; border-radius: 12px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); padding: 12px 16px; min-height: 48px;
+  }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); flex: 1; }
+  button.secondary { flex: 1; }
+  button:disabled { opacity: .45; }
+  label.vol { display: block; margin-top: 14px; font-size: 14px; color: var(--muted); }
+  input[type=range] { width: 100%; height: 36px; accent-color: var(--accent); }
+  ul.devices { list-style: none; margin: 0; padding: 0; }
+  ul.devices li { display: flex; align-items: center; gap: 12px; padding: 12px 4px;
+                  border-top: 1px solid var(--line); min-height: 52px; }
+  ul.devices li:first-child { border-top: 0; }
+  ul.devices li.selected .name { color: var(--accent); }
+  .radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); flex: none; }
+  li.selected .radio { border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--card);
+                       background: var(--accent); }
+  .name { font-weight: 600; }
+  .model { font-size: 13px; color: var(--muted); }
+  .badge { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
+           border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .meter { position: relative; height: 28px; background: var(--meter-bg); border-radius: 8px; overflow: hidden; }
+  .meter .rms, .meter .peak { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+                              transition: width .2s linear; }
+  .meter .peak { background: var(--peak); opacity: .55; }
+  .meter .rms { background: var(--rms); }
+  .meter .thr { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: .6; }
+  .scale { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .levels { display: flex; justify-content: space-between; margin-top: 8px; font-size: 14px;
+            font-variant-numeric: tabular-nums; }
+  .clip { color: var(--err); font-weight: 700; display: none; }
+  .clip.on { display: inline; }
+  .field { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+           padding: 10px 0; border-top: 1px solid var(--line); }
+  .field:first-of-type { border-top: 0; }
+  .field span small { display: block; color: var(--muted); font-size: 12px; }
+  select, input[type=number] { font: inherit; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line);
+                               background: var(--bg); color: var(--text); min-width: 110px; min-height: 44px; }
+  input[type=checkbox] { width: 26px; height: 26px; accent-color: var(--accent); }
+  .msg { font-size: 14px; margin-top: 10px; min-height: 1.4em; }
+  .msg.ok { color: var(--ok); } .msg.err { color: var(--err); }
+  details summary { cursor: pointer; font-weight: 600; min-height: 44px; display: flex; align-items: center; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 14px; margin: 8px 0; }
+  dt { color: var(--muted); } dd { margin: 0; font-variant-numeric: tabular-nums; }
+  ol.events { list-style: none; padding: 0; margin: 8px 0 0; font: 12px/1.45 ui-monospace, Menlo, monospace;
+              max-height: 320px; overflow-y: auto; }
+  ol.events li { padding: 3px 0; border-top: 1px solid var(--line); word-break: break-word; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VinylCast</h1>
+  <div class="conn"><span id="dot" class="dot"></span><span id="conn">connecting…</span></div>
+</header>
+
+<section class="card" aria-labelledby="now-h">
+  <h2 id="now-h">Now</h2>
+  <p id="state" class="state">…</p>
+  <p id="sub" class="sub"></p>
+  <div id="note" class="note" role="status"></div>
+  <div class="row">
+    <button id="play" class="primary">Play</button>
+    <button id="stop" class="secondary">Stop</button>
+  </div>
+  <label class="vol" for="vol">Speaker volume <span id="volval"></span></label>
+  <input id="vol" type="range" min="0" max="100" step="1" value="50" disabled>
+</section>
+
+<section class="card" aria-labelledby="spk-h">
+  <h2 id="spk-h">Speaker</h2>
+  <ul id="devices" class="devices"></ul>
+  <p id="nodevices" class="empty">Looking for speakers…</p>
+</section>
+
+<section class="card" aria-labelledby="lvl-h">
+  <h2 id="lvl-h">Input level</h2>
+  <div class="meter" aria-hidden="true">
+    <div id="peakbar" class="peak"></div><div id="rmsbar" class="rms"></div><div id="thr" class="thr"></div>
+  </div>
+  <div class="scale"><span>−60</span><span>−40</span><span>−20</span><span>0 dBFS</span></div>
+  <div class="levels">
+    <span>RMS <b id="rms">–</b> · peak <b id="peak">–</b></span>
+    <span><span id="clip" class="clip">CLIPPING</span> <span id="signal"></span></span>
+  </div>
+</section>
+
+<section class="card" aria-labelledby="set-h">
+  <h2 id="set-h">Settings</h2>
+  <form id="settings">
+    <div class="field"><span>Auto-cast<small>Start on needle drop, stop after silence</small></span>
+      <input type="checkbox" name="auto_cast"></div>
+    <div class="field"><span>Codec<small>Changing it restarts the stream (~2 s)</small></span>
+      <select name="codec"><option value="mp3">MP3</option><option value="flac">FLAC</option></select></div>
+    <div class="field"><span>MP3 bitrate</span>
+      <select name="mp3_bitrate">
+        <option>128k</option><option>192k</option><option>256k</option><option>320k</option>
+      </select></div>
+    <div class="field"><span>Music threshold<small>dBFS RMS (line on the meter)</small></span>
+      <input type="number" name="detect_threshold_db" min="-80" max="-5" step="1"></div>
+    <div class="field"><span>Music must last<small>seconds before casting</small></span>
+      <input type="number" name="detect_on_s" min="0.5" max="10" step="0.5"></div>
+    <div class="field"><span>Stop after silence<small>seconds (longer than a side flip)</small></span>
+      <input type="number" name="stop_after_silence_s" min="30" max="1800" step="10"></div>
+    <div class="row"><button class="primary" type="submit">Save</button></div>
+    <div id="setmsg" class="msg" role="status"></div>
+  </form>
+</section>
+
+<section class="card">
+  <details id="diag">
+    <summary>Diagnostics</summary>
+    <dl id="health"></dl>
+    <button id="diagrefresh" type="button">Refresh</button>
+    <ol id="events" class="events"></ol>
+  </details>
+</section>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const MIN_DB = -60;
+let status = null, settings = null, devices = [];
+
+async function api(path, body) {
+  const opts = body === undefined ? {} : {
+    method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)};
+  const r = await fetch("/api/" + path, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+function pct(db) {
+  if (db === null || db === undefined || !isFinite(db)) return 0;
+  return Math.max(0, Math.min(100, (db - MIN_DB) / -MIN_DB * 100));
+}
+
+const HOLD = {
+  manual: "Stopped – waiting for the next record",
+  taken_over: "Another app took over the speaker",
+  busy: "Speaker is busy with another app",
+  unavailable: "Speaker not found on the network",
+  errors: "Playback failed – waiting for the next record",
+};
+
+function renderStatus(s) {
+  status = s;
+  const t = s.target || "no speaker chosen";
+  let line;
+  if (s.state === "playing") line = "Playing on " + t;
+  else if (s.state === "starting") line = "Starting on " + t + "…";
+  else if (s.state === "stopping") line = "Stopping…";
+  else if (s.hold && HOLD[s.hold]) line = HOLD[s.hold];
+  else line = s.auto_cast ? "Waiting for the needle" : "Idle (auto-cast off)";
+  $("state").textContent = line;
+  $("sub").textContent = [s.target ? "Speaker: " + s.target : "Choose a speaker below",
+                          (s.codec || "").toUpperCase(), s.clients + " listener" + (s.clients === 1 ? "" : "s")]
+                          .join(" · ");
+  const note = (s.notifications || []).slice(-1)[0];
+  const n = $("note");
+  n.className = "note" + (note ? " " + note.level : "");
+  n.textContent = note ? note.message : "";
+  const active = s.state === "playing" || s.state === "starting";
+  $("play").disabled = active || !s.target;
+  $("stop").disabled = !active;
+  $("vol").disabled = s.state !== "playing";
+  $("signal").textContent = s.signal ? "♪ music" : "silence";
+  if (s.level) renderLevel(s.level);
+  renderDevices();
+}
+
+function renderLevel(l) {
+  $("rmsbar").style.width = pct(l.rms_db) + "%";
+  $("peakbar").style.width = pct(l.peak_db) + "%";
+  $("rms").textContent = isFinite(l.rms_db) ? l.rms_db.toFixed(0) : "–∞";
+  $("peak").textContent = isFinite(l.peak_db) ? l.peak_db.toFixed(0) : "–∞";
+  $("clip").classList.toggle("on", l.peak_db > -1);
+}
+
+function renderDevices() {
+  const ul = $("devices");
+  ul.replaceChildren();
+  $("nodevices").style.display = devices.length ? "none" : "block";
+  for (const d of devices) {
+    const li = document.createElement("li");
+    if (status && d.name === status.target) li.className = "selected";
+    const radio = document.createElement("span"); radio.className = "radio";
+    const text = document.createElement("div");
+    const name = document.createElement("div"); name.className = "name"; name.textContent = d.name;
+    if (d.kind === "group") {
+      const b = document.createElement("span"); b.className = "badge"; b.textContent = "group"; name.append(b);
+    }
+    text.append(name);
+    if (d.model && d.model !== d.name) {  // HESTON 120 reports its own name as the model
+      const model = document.createElement("div"); model.className = "model"; model.textContent = d.model;
+      text.append(model);
+    }
+    li.append(radio, text);
+    li.addEventListener("click", () => chooseSpeaker(d.name));
+    ul.append(li);
+  }
+}
+
+async function chooseSpeaker(name) {
+  try {
+    const active = status && (status.state === "playing" || status.state === "starting");
+    renderStatus(await api(active ? "play" : "target", {target: name}));
+  } catch (e) { flash(e.message); }
+}
+
+function flash(message) {
+  const n = $("note"); n.className = "note error"; n.textContent = message;
+}
+
+async function loadDevices() {
+  try { devices = await api("devices"); renderDevices(); } catch (e) { /* keep last list */ }
+}
+
+async function loadSettings() {
+  settings = await api("settings");
+  const f = $("settings");
+  for (const [k, v] of Object.entries(settings)) {
+    const el = f.elements[k];
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = !!v; else el.value = v;
+  }
+  f.elements.mp3_bitrate.disabled = settings.codec !== "mp3";
+  $("thr").style.left = pct(settings.detect_threshold_db) + "%";
+}
+
+$("settings").elements.codec.addEventListener("change", (e) => {
+  $("settings").elements.mp3_bitrate.disabled = e.target.value !== "mp3";
+});
+
+$("settings").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = e.target, msg = $("setmsg");
+  const changed = {};
+  for (const k of Object.keys(settings)) {
+    const el = f.elements[k];
+    if (!el) continue;
+    const v = el.type === "checkbox" ? el.checked : (el.type === "number" ? Number(el.value) : el.value);
+    if (v !== settings[k]) changed[k] = v;
+  }
+  if (!Object.keys(changed).length) { msg.className = "msg"; msg.textContent = "No changes."; return; }
+  msg.className = "msg"; msg.textContent = "Saving…";
+  try {
+    await api("settings", changed);
+    await loadSettings();
+    msg.className = "msg ok"; msg.textContent = "Saved.";
+  } catch (err) { msg.className = "msg err"; msg.textContent = err.message; }
+});
+
+$("play").addEventListener("click", async () => {
+  try { renderStatus(await api("play", {})); } catch (e) { flash(e.message); }
+});
+$("stop").addEventListener("click", async () => {
+  try { renderStatus(await api("stop", {})); } catch (e) { flash(e.message); }
+});
+
+let volTimer = null;
+$("vol").addEventListener("input", (e) => {
+  $("volval").textContent = e.target.value + "%";
+  clearTimeout(volTimer);
+  volTimer = setTimeout(async () => {
+    try { await api("volume", {level: Number(e.target.value) / 100}); } catch (err) { flash(err.message); }
+  }, 250);
+});
+
+async function loadDiagnostics() {
+  const d = await api("diagnostics");
+  const h = (d.health || {}), w = h.wifi || {}, s = d.sample || {};
+  const rows = [
+    ["Wi-Fi", w.signal_dbm !== undefined ? w.signal_dbm + " dBm, " + (w.freq_mhz || "?") + " MHz" : "n/a"],
+    ["Power save", w.power_save === undefined ? "n/a" : (w.power_save ? "ON" : "off")],
+    ["Throttled", h.throttled || "n/a"],
+    ["CPU (py / ffmpeg)", [(s.python || {}).cpu_pct, (s.ffmpeg || {}).cpu_pct]
+        .map((v) => v === undefined || v === null ? "–" : v + " %").join(" / ")],
+  ];
+  const dl = $("health"); dl.replaceChildren();
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  const ol = $("events"); ol.replaceChildren();
+  for (const e of (d.events || []).slice().reverse()) {
+    const li = document.createElement("li");
+    const time = new Date(e.ts * 1000).toLocaleTimeString();
+    const extra = Object.entries(e).filter(([k]) => !["ts", "kind", "event", "config", "headers"].includes(k))
+      .map(([k, v]) => k + "=" + (typeof v === "object" ? JSON.stringify(v) : v)).join(" ");
+    li.textContent = time + "  " + e.event + "  " + extra;
+    ol.append(li);
+  }
+}
+$("diag").addEventListener("toggle", (e) => { if (e.target.open) loadDiagnostics().catch(() => {}); });
+$("diagrefresh").addEventListener("click", () => loadDiagnostics().catch(() => {}));
+
+function connect() {
+  const es = new EventSource("/api/events");
+  es.addEventListener("open", () => { $("dot").classList.add("on"); $("conn").textContent = "live"; });
+  es.addEventListener("error", () => { $("dot").classList.remove("on"); $("conn").textContent = "reconnecting…"; });
+  es.addEventListener("status", (e) => renderStatus(JSON.parse(e.data)));
+  es.addEventListener("level", (e) => renderLevel(JSON.parse(e.data)));
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) { api("status").then(renderStatus).catch(() => {}); loadDevices(); }
+});
+
+(async () => {
+  try { renderStatus(await api("status")); } catch (e) { flash("Cannot reach VinylCast: " + e.message); }
+  loadSettings().catch((e) => flash(e.message));
+  loadDevices();
+  setInterval(loadDevices, 15000);
+  connect();
+})();
+</script>
+</body>
+</html>
