@@ -72,13 +72,15 @@ class Rig:
         self.sessions: list[FakeSession] = []
         self.session_kw = session_kw
         self.store = StateStore(tmp_path / "state.json")
-        cfg = load_config(overrides={"source": "tone", "advertise_ip": "10.0.0.2",
-                                     "cast_target": "HESTON 120",
-                                     "detect_threshold_db": -50, "detect_on_s": 1.0})  # fmt: skip
-        self.service = FakeService(cfg)
+        # Same flags for service and driver, as `daemon` does: apply_settings rebuilds the
+        # config from TOML + flags, so a missing flag would change the stream URL.
+        flags = {"source": "tone", "advertise_ip": "10.0.0.2", "cast_target": "HESTON 120",
+                 "detect_threshold_db": -50, "detect_on_s": 1.0}  # fmt: skip
+        self.service = FakeService(load_config(overrides=flags))
         self.driver = Driver(
             self.service, self.store, self.store.load(),  # empty: target from cast_target
             Metrics(tmp_path / "m.jsonl"), self.factory, clock=lambda: self.now, tick_s=0.005,
+            cli_overrides=flags,
         )  # fmt: skip
 
     def factory(self, name: str, on_end: Callable[[str], None]) -> FakeSession:
