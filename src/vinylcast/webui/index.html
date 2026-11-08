@@ -28,6 +28,24 @@
   h1 { font-size: 22px; margin: 0; letter-spacing: .2px; }
   h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
        margin: 0 0 10px; font-weight: 600; }
+  .head-right { display: flex; align-items: center; gap: 14px; }
+  .iconbtn { width: 48px; height: 48px; min-height: 48px; padding: 0; display: inline-flex;
+             align-items: center; justify-content: center; border-radius: 50%; }
+  .iconbtn svg { width: 26px; height: 26px; fill: currentColor; }
+  #cog { border: 0; background: transparent; color: var(--text); width: 44px; height: 44px; min-height: 44px; }
+  .transport { display: flex; gap: 16px; justify-content: center; margin-top: 16px; }
+  .transport .iconbtn { width: 64px; height: 64px; }
+  .transport .iconbtn svg { width: 30px; height: 30px; }
+  #play.iconbtn { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  select.speaker { width: 100%; font-size: 17px; font-weight: 600; }
+  .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .45); display: none;
+             align-items: flex-end; justify-content: center; z-index: 10; }
+  .overlay.open { display: flex; }
+  .sheet { background: var(--card); width: 100%; max-width: 560px; max-height: 92vh; overflow-y: auto;
+           border-radius: 18px 18px 0 0; padding: 16px 16px max(24px, env(safe-area-inset-bottom)); }
+  .sheet-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .sheet-head h2 { margin: 0; font-size: 18px; text-transform: none; letter-spacing: 0; color: var(--text); }
+  body.locked { overflow: hidden; }
   .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--err); display: inline-block; }
   .dot.on { background: var(--ok); }
   .conn { font-size: 13px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
@@ -50,19 +68,6 @@
   button:disabled { opacity: .45; }
   label.vol { display: block; margin-top: 14px; font-size: 14px; color: var(--muted); }
   input[type=range] { width: 100%; height: 36px; accent-color: var(--accent); }
-  ul.devices { list-style: none; margin: 0; padding: 0; }
-  ul.devices li { display: flex; align-items: center; gap: 12px; padding: 12px 4px;
-                  border-top: 1px solid var(--line); min-height: 52px; }
-  ul.devices li:first-child { border-top: 0; }
-  ul.devices li.selected .name { color: var(--accent); }
-  .radio { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--muted); flex: none; }
-  li.selected .radio { border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--card);
-                       background: var(--accent); }
-  .name { font-weight: 600; }
-  .model { font-size: 13px; color: var(--muted); }
-  .badge { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted);
-           border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
-  .empty { color: var(--muted); font-size: 14px; }
   .meter { position: relative; height: 28px; background: var(--meter-bg); border-radius: 8px; overflow: hidden; }
   .meter .rms, .meter .peak { position: absolute; left: 0; top: 0; bottom: 0; width: 0;
                               transition: width .2s linear; }
@@ -94,7 +99,12 @@
 <body>
 <header>
   <h1>VinylCast</h1>
-  <div class="conn"><span id="dot" class="dot"></span><span id="conn">connecting…</span></div>
+  <div class="head-right">
+    <div class="conn"><span id="dot" class="dot"></span><span id="conn">connecting…</span></div>
+    <button id="cog" class="iconbtn" type="button" aria-label="Settings" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.6 7.6 0 0 0-1.7-1L14.9 3h-4l-.4 2.9a7.6 7.6 0 0 0-1.7 1l-2.5-1-2 3.5L6.4 11a7.5 7.5 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1c.5.4 1.1.7 1.7 1l.4 2.9h4l.4-2.9c.6-.3 1.2-.6 1.7-1l2.5 1 2-3.5zM12.9 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+    </button>
+  </div>
 </header>
 
 <section class="card" aria-labelledby="now-h">
@@ -102,18 +112,16 @@
   <p id="state" class="state">…</p>
   <p id="sub" class="sub"></p>
   <div id="note" class="note" role="status"></div>
-  <div class="row">
-    <button id="play" class="primary">Play</button>
-    <button id="stop" class="secondary">Stop</button>
+  <div class="transport">
+    <button id="play" class="iconbtn" type="button" aria-label="Play">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z"/></svg>
+    </button>
+    <button id="stop" class="iconbtn" type="button" aria-label="Stop">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></svg>
+    </button>
   </div>
   <label class="vol" for="vol">Speaker volume <span id="volval"></span></label>
   <input id="vol" type="range" min="0" max="100" step="1" value="50" disabled>
-</section>
-
-<section class="card" aria-labelledby="spk-h">
-  <h2 id="spk-h">Speaker</h2>
-  <ul id="devices" class="devices"></ul>
-  <p id="nodevices" class="empty">Looking for speakers…</p>
 </section>
 
 <section class="card" aria-labelledby="lvl-h">
@@ -128,9 +136,33 @@
   </div>
 </section>
 
-<section class="card" aria-labelledby="set-h">
-  <h2 id="set-h">Settings</h2>
-  <form id="settings">
+<section class="card">
+  <h2><label for="speaker">Speaker</label></h2>
+  <select id="speaker" class="speaker"><option>Looking for speakers…</option></select>
+</section>
+
+
+
+
+
+<section class="card">
+  <details id="diag">
+    <summary>Diagnostics</summary>
+    <dl id="health"></dl>
+    <button id="diagrefresh" type="button">Refresh</button>
+    <ol id="events" class="events"></ol>
+  </details>
+</section>
+
+<div id="overlay" class="overlay" role="dialog" aria-modal="true" aria-labelledby="set-h">
+  <div class="sheet">
+    <div class="sheet-head">
+      <h2 id="set-h">Settings</h2>
+      <button id="closeset" class="iconbtn" type="button" aria-label="Close settings">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.4 5 5 6.4 10.6 12 5 17.6 6.4 19 12 13.4 17.6 19 19 17.6 13.4 12 19 6.4 17.6 5 12 10.6z"/></svg>
+      </button>
+    </div>
+    <form id="settings">
     <div class="field"><span>Auto-cast<small>Start on needle drop, stop after silence</small></span>
       <input type="checkbox" name="auto_cast"></div>
     <div class="field"><span>Codec<small>Changing it restarts the stream (~2 s)</small></span>
@@ -148,16 +180,8 @@
     <div class="row"><button class="primary" type="submit">Save</button></div>
     <div id="setmsg" class="msg" role="status"></div>
   </form>
-</section>
-
-<section class="card">
-  <details id="diag">
-    <summary>Diagnostics</summary>
-    <dl id="health"></dl>
-    <button id="diagrefresh" type="button">Refresh</button>
-    <ol id="events" class="events"></ol>
-  </details>
-</section>
+  </div>
+</div>
 
 <script>
 "use strict";
@@ -222,28 +246,26 @@ function renderLevel(l) {
 }
 
 function renderDevices() {
-  const ul = $("devices");
-  ul.replaceChildren();
-  $("nodevices").style.display = devices.length ? "none" : "block";
-  for (const d of devices) {
-    const li = document.createElement("li");
-    if (status && d.name === status.target) li.className = "selected";
-    const radio = document.createElement("span"); radio.className = "radio";
-    const text = document.createElement("div");
-    const name = document.createElement("div"); name.className = "name"; name.textContent = d.name;
-    if (d.kind === "group") {
-      const b = document.createElement("span"); b.className = "badge"; b.textContent = "group"; name.append(b);
-    }
-    text.append(name);
-    if (d.model && d.model !== d.name) {  // HESTON 120 reports its own name as the model
-      const model = document.createElement("div"); model.className = "model"; model.textContent = d.model;
-      text.append(model);
-    }
-    li.append(radio, text);
-    li.addEventListener("click", () => chooseSpeaker(d.name));
-    ul.append(li);
+  const sel = $("speaker");
+  const current = status ? status.target : null;
+  const names = devices.map((d) => d.name);
+  const opts = [];
+  if (!devices.length && !current) {
+    const o = new Option("Looking for speakers…", ""); o.disabled = true; opts.push(o);
+  } else if (!current) {
+    const o = new Option("Choose a speaker…", ""); o.disabled = true; opts.push(o);
   }
+  for (const d of devices) {
+    let label = d.name + (d.kind === "group" ? " (group)" : "");
+    if (d.model && d.model !== d.name) label += " – " + d.model;
+    opts.push(new Option(label, d.name));
+  }
+  if (current && !names.includes(current)) opts.push(new Option(current + " (not seen yet)", current));
+  sel.replaceChildren(...opts);
+  sel.value = current || "";
 }
+
+$("speaker").addEventListener("change", (e) => { if (e.target.value) chooseSpeaker(e.target.value); });
 
 async function chooseSpeaker(name) {
   try {
@@ -271,6 +293,16 @@ async function loadSettings() {
   f.elements.mp3_bitrate.disabled = settings.codec !== "mp3";
   $("thr").style.left = pct(settings.detect_threshold_db) + "%";
 }
+
+function openSettings(open) {
+  $("overlay").classList.toggle("open", open);
+  document.body.classList.toggle("locked", open);
+  if (open) { $("setmsg").textContent = ""; loadSettings().catch((e) => flash(e.message)); }
+}
+$("cog").addEventListener("click", () => openSettings(true));
+$("closeset").addEventListener("click", () => openSettings(false));
+$("overlay").addEventListener("click", (e) => { if (e.target === $("overlay")) openSettings(false); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") openSettings(false); });
 
 $("settings").elements.codec.addEventListener("change", (e) => {
   $("settings").elements.mp3_bitrate.disabled = e.target.value !== "mp3";
