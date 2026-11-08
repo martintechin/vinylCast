@@ -25,6 +25,12 @@ python scripts/soak_summary.py FILE.jsonl      # soak verdict (logic in vinylcas
 tests/fixtures/make_fixtures.sh                # regenerate framing fixtures (ffmpeg)
 ```
 
+## Status
+M0-M4 done. M5 code done; the 60-min soak run is deferred by Martin (see README "Deferred / open
+items", which also lists the open group checks, loud-record level check, peak logging on ffmpeg 7
+and Wi-Fi power-save persistence). Targets in use: "HESTON 120" (192.168.1.65) and
+"Tvättstugan" (Nest Mini, 192.168.1.124); both "Cast Lite" receivers.
+
 ## Working rules
 - Build one milestone at a time (M0 → M6). After each: run its checks, report commands and output, stop and wait for approval.
 - One commit per milestone; acceptance evidence (commands + output) goes in the commit body.

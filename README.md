@@ -3,7 +3,9 @@
 PoC: turntable → phono preamp → Behringer UFO202 → Raspberry Pi 3 → HTTP audio stream → Chromecast device or Cast group.
 See [PLAN.md](PLAN.md) for scope, milestones and acceptance criteria.
 
-Status: **M5 (soak test), code done, 60-minute run pending.** M4 passed (loudest-passage
+Status: **M5 code done; the 60-minute soak run is DEFERRED** (Martin, 2026-11-08: no
+indication of problems so far, listening has been good). Open items are listed under
+"Deferred" below. M4 passed (loudest-passage
 check on available records only: -10.3 dBFS; re-check with a loud record). M3 passed on a
 single device (Nest Mini); group checks open (no group yet).
 
@@ -68,6 +70,16 @@ Precedence: built-in defaults < TOML < flags.
 | `cast --to NAME` | Sends the stream URL to a target | M3 |
 | `stop --to NAME` | Stops playback on a target | M3 |
 | `run --to NAME` | `serve` + `cast` in one process | M3 |
+
+## Deferred / open items
+
+| Item | Why open | How to close |
+| --- | --- | --- |
+| M5 60-minute soak (MP3, one device) | Deferred by Martin; short runs on Nest Mini and HESTON 120 sounded fine | `sudo systemctl start vinylcast` for 62+ min, then `python scripts/soak_summary.py $(ls -t soak-*.jsonl \| head -1)` |
+| Cast group checks (M3, M6) | No speaker group exists yet | Create a group in Google Home, rerun `devices` and `run --to <group>` |
+| Loudest-passage level check (M4) | No loud record at hand; loudest seen -10.3 dBFS | `vinylcast levels` on a loud record (service stopped) |
+| Peak logging (`peak_log_s`) | Silences the stream on the Pi's ffmpeg 7 (both variants); off by default | Needs ffmpeg 7's error lines from a failed run |
+| Wi-Fi power save off after reboot | Set via nmcli on the netplan connection; persistence unverified | `iw dev wlan0 get power_save` after a reboot |
 
 ## Results (M6)
 
