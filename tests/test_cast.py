@@ -107,3 +107,73 @@ async def test_no_startup_event_without_play(tmp_path: Path) -> None:
     from_thread(mon.new_media_status, status("PLAYING"))
     assert events(path, "cast_startup") == []
     assert [e["player_state"] for e in events(path, "cast_state")] == ["PLAYING"]
+
+
+def test_classify_idle() -> None:
+    from vinylcast.cast import classify_idle
+
+    assert classify_idle("CANCELLED") == "cancelled"
+    assert classify_idle("INTERRUPTED") == "taken_over"
+    assert classify_idle("ERROR") == "error"
+    assert classify_idle("FINISHED") == "error"  # endless stream ended = connection problem
+    assert classify_idle(None) == "error"
+
+
+def test_classify_app_change() -> None:
+    from vinylcast.cast import classify_app_change
+
+    dmr, spotify, backdrop = "CC1AD845", "CC32E753", "E8C28D3C"
+    assert classify_app_change(dmr, spotify) == "taken_over"
+    assert classify_app_change(dmr, None) == "cancelled"
+    assert classify_app_change(dmr, backdrop) == "cancelled"
+    assert classify_app_change(None, dmr) is None
+    assert classify_app_change(spotify, None) is None  # not ours
+
+
+def test_is_busy() -> None:
+    from vinylcast.cast import is_busy
+
+    url = "http://192.168.1.102:8800/stream.mp3"
+    assert not is_busy(None, None, url)
+    assert not is_busy("E8C28D3C", None, url)  # idle screen
+    assert not is_busy("CC1AD845", None, url)  # media receiver, nothing loaded
+    assert not is_busy("CC1AD845", url, url)  # already ours
+    assert is_busy("CC1AD845", "http://other/x.mp3", url)
+    assert is_busy("CC32E753", None, url)  # another app
+
+
+async def test_monitor_reports_end_once(tmp_path: Path) -> None:
+    path = tmp_path / "m.jsonl"
+    ends: list[str] = []
+    mon = StatusMonitor(Metrics(path), "T", asyncio.get_running_loop(), ends.append)
+    mon.play_sent()
+    from_thread(mon.new_media_status, status("PLAYING"))
+    from_thread(mon.new_media_status, status("IDLE", "CANCELLED"))
+    from_thread(mon.new_connection_status, SimpleNamespace(status="LOST", address=None))
+    await asyncio.sleep(0.05)
+    assert ends == ["cancelled"]  # only the first end per play
+    assert [e["reason"] for e in events(path, "cast_ended")] == ["cancelled"]
+
+
+async def test_monitor_ignores_own_disconnect_and_pre_play_idle(tmp_path: Path) -> None:
+    ends: list[str] = []
+    mon = StatusMonitor(Metrics(tmp_path / "m.jsonl"), "T", asyncio.get_running_loop(), ends.append)
+    mon.play_sent()
+    from_thread(mon.new_media_status, status("IDLE"))  # before first PLAYING: not an end
+    from_thread(mon.new_media_status, status("PLAYING"))
+    mon.closing = True
+    from_thread(mon.new_connection_status, SimpleNamespace(status="DISCONNECTED", address=None))
+    await asyncio.sleep(0.05)
+    assert ends == []
+
+
+async def test_monitor_app_takeover(tmp_path: Path) -> None:
+    ends: list[str] = []
+    mon = StatusMonitor(Metrics(tmp_path / "m.jsonl"), "T", asyncio.get_running_loop(), ends.append)
+    app = lambda a: SimpleNamespace(app_id=a, display_name=a)  # noqa: E731
+    from_thread(mon.new_cast_status, app("CC1AD845"))
+    mon.play_sent()
+    from_thread(mon.new_media_status, status("PLAYING"))
+    from_thread(mon.new_cast_status, app("CC32E753"))
+    await asyncio.sleep(0.05)
+    assert ends == ["taken_over"]

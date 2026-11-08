@@ -125,4 +125,12 @@ Slow-client detection depends on server.py limiting per-connection socket buffer
 (SO_SNDBUF + transport high-water mark); without it Linux absorbs ~100 s of audio per
 stalled connection and the hub never sees the lag. Keep test producers real-time.
 
+Revision 1 (in progress): `vinylcast daemon` = Service (measure_levels forced on) + driver.py.
+Level readings -> detector.py (on/off with hysteresis) -> controller.py (pure state machine,
+returns Cast/Stop/Notify actions; one test per rule in docs/PLAN-rev1.md) -> driver executes
+them one at a time via cast.CastSession (end reasons: classify_idle / classify_app_change;
+busy check before casting) and persists last speaker + UI settings in state.json (state.py).
+Service.reconfigure() changes codec etc. without a process restart (listeners dropped, the
+driver re-casts). `run` is unchanged (PoC behaviour).
+
 Module boundaries matter: revision 1 replaces `cli.py` with a web UI without touching the audio path.

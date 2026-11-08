@@ -82,6 +82,10 @@ class StreamServer:
         self.app.router.add_get("/stream.flac", self._stream)
         self.app.router.add_get("/health", self._health)
 
+    def set_config(self, cfg: Config) -> None:
+        """Codec (which stream path answers) and other settings may change at runtime."""
+        self._cfg = cfg
+
     @web.middleware
     async def _log_request(self, request: web.Request, handler: Handler) -> web.StreamResponse:
         self._metrics.event(

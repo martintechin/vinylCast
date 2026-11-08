@@ -122,3 +122,30 @@ async def test_stream_with_peak_logging(svc_peaks: Service, tmp_path: Path) -> N
     assert peaks[0]["readings"] >= 9  # ~10 readings/s (100 ms blocks)
     assert svc_peaks.latest_level is not None
     assert events(path, "encoder_restart") == [] and events(path, "ffmpeg_warning") == []
+
+
+async def test_reconfigure_codec_without_restart(tmp_path: Path) -> None:
+    """R1: codec change inside the running process: encoder restarted, listeners dropped
+    (the driver re-casts), /stream.flac answers afterwards, /stream.mp3 is 404."""
+    cfg = load_config(overrides={"source": "tone", "metrics_path": str(tmp_path / "m.jsonl")})
+    svc = Service(cfg, sample_interval_s=0.5)
+    port = await svc.start(port=0)
+    try:
+        base = f"http://127.0.0.1:{port}"
+        await record(f"{base}/stream.mp3", tmp_path / "a.mp3", 2)
+        old_pid = svc.encoder.pid
+        changed = await svc.reconfigure(load_config(overrides={
+            "source": "tone", "codec": "flac", "metrics_path": cfg.metrics_path}))  # fmt: skip
+        assert changed == ["codec"]
+        await wait_until(lambda: svc.encoder.pid not in (None, old_pid))
+        rec = tmp_path / "b.flac"
+        await record(f"{base}/stream.flac", rec, 3)
+        assert rec.read_bytes().startswith(b"fLaC") and decode_errors(rec) == []
+        async with aiohttp.ClientSession() as s, s.get(f"{base}/stream.mp3") as r:
+            assert r.status == 404
+        assert await svc.reconfigure(svc.cfg) == []  # nothing changed: no restart
+    finally:
+        await svc.stop()
+    path = Path(cfg.metrics_path)
+    assert events(path, "service_reconfigured")[0]["changed"] == ["codec"]
+    assert events(path, "encoder_restart") == []  # a reconfigure is not a crash

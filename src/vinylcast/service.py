@@ -9,6 +9,7 @@ import asyncio
 import contextlib
 import signal
 import sys
+from collections.abc import Callable
 from typing import Any
 
 from vinylcast.config import Config
@@ -24,28 +25,38 @@ from vinylcast.server import StreamServer, stream_url
 class Service:
     def __init__(self, cfg: Config, *, sample_interval_s: float = 5.0, **encoder_kw: Any) -> None:
         self.cfg = cfg
+        self._encoder_kw = encoder_kw
+        self.level_listeners: list[Callable[[Level], None]] = []
         self.metrics = Metrics(cfg.metrics_path)
         self.hub = Hub(cfg.client_max_buffer_s, self.metrics)
         self.framer = make_framer(cfg.codec, self._on_flac_header)
         self.level_reader = LevelReader()
         self.peaks = PeakLogger(self.metrics, cfg.peak_log_s)
         self.latest_level: Level | None = None
-        self.encoder = Encoder(
-            build_command(cfg),
-            self._on_chunk,
-            self.metrics,
-            on_start=self._on_encoder_start,
-            on_info=self._on_ffmpeg_info,
-            **encoder_kw,
-        )
+        self.encoder = self._make_encoder(cfg)
+        self._encoder_task: asyncio.Task[None] | None = None
         self.server = StreamServer(
-            cfg, self.hub, self.metrics, self.encoder.status, lambda: self.framer.stream_header
+            cfg,
+            self.hub,
+            self.metrics,
+            lambda: self.encoder.status(),  # the encoder object is replaced on reconfigure
+            lambda: self.framer.stream_header,
         )
         self.sampler = Sampler(
             self.metrics, self.hub.stats, lambda: self.encoder.pid, sample_interval_s
         )
         self.health = PiHealth(self.metrics)
         self._tasks: list[asyncio.Task[None]] = []
+
+    def _make_encoder(self, cfg: Config) -> Encoder:
+        return Encoder(
+            build_command(cfg),
+            self._on_chunk,
+            self.metrics,
+            on_start=self._on_encoder_start,
+            on_info=self._on_ffmpeg_info,
+            **self._encoder_kw,
+        )
 
     def _on_chunk(self, data: bytes) -> None:
         skipped = self.framer.skipped_bytes
@@ -66,6 +77,8 @@ class Service:
         if level is not None:
             self.latest_level = level
             self.peaks.add(level)
+            for listener in self.level_listeners:
+                listener(level)
 
     def _on_flac_header(self, header: bytes, old: bytes | None) -> None:
         if old is None:
@@ -79,15 +92,44 @@ class Service:
 
     async def start(self, port: int | None = None) -> int:
         bound = await self.server.start(port=port)
+        self._encoder_task = asyncio.create_task(self.encoder.run(), name="encoder")
         self._tasks = [
-            asyncio.create_task(self.encoder.run(), name="encoder"),
             asyncio.create_task(self.sampler.run(), name="sampler"),
             asyncio.create_task(self.health.run(), name="pi-health"),
         ]
         return bound
 
-    async def stop(self) -> None:
+    async def reconfigure(self, cfg: Config) -> list[str]:
+        """Apply a new config without restarting the process. Settings that change the stream
+        (codec, bitrate, source, rate, measurement) restart the encoder and disconnect all
+        listeners; the caller re-casts. Returns the names of the stream settings that changed
+        (empty: nothing had to be restarted)."""
+        keys = ("codec", "mp3_bitrate", "source", "alsa_device", "source_file", "tone_beep_s",
+                "sample_rate", "measure_levels")  # fmt: skip
+        changed = [k for k in keys if getattr(cfg, k) != getattr(self.cfg, k)]
+        self.cfg = cfg
+        self.peaks = PeakLogger(self.metrics, cfg.peak_log_s)
+        self.server.set_config(cfg)
+        if not changed:
+            return []
+        await self._stop_encoder()
+        self.hub.close("reconfigure")
+        if "codec" in changed:
+            self.framer = make_framer(cfg.codec, self._on_flac_header)
+        self.encoder = self._make_encoder(cfg)
+        self._encoder_task = asyncio.create_task(self.encoder.run(), name="encoder")
+        self.metrics.event("service_reconfigured", changed=changed, codec=cfg.codec)
+        return changed
+
+    async def _stop_encoder(self) -> None:
         await self.encoder.stop()
+        if self._encoder_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.wait_for(self._encoder_task, 10)
+            self._encoder_task = None
+
+    async def stop(self) -> None:
+        await self._stop_encoder()
         self.hub.close("shutdown")
         await self.server.stop()
         for task in self._tasks:
@@ -173,3 +215,50 @@ async def run_cast(cfg: Config) -> int:
     finally:
         await session.disconnect()
         await service.stop()
+
+
+async def run_daemon(toml_path: Any, overrides: dict[str, Any]) -> int:
+    """`daemon` (revision 1): always capture and measure; cast to the last speaker when music
+    is detected, stop after `stop_after_silence_s` of silence. Settings changed in the UI
+    (state.json) override the TOML; command-line flags override both."""
+    from dataclasses import replace
+
+    from vinylcast.cast import CastSession
+    from vinylcast.config import ConfigError, load_config
+    from vinylcast.driver import Driver
+    from vinylcast.state import StateStore
+
+    base = load_config(toml_path, overrides)
+    store = StateStore(base.state_path)
+    state = store.load()
+    try:
+        cfg = load_config(toml_path, overrides, state.settings)
+    except ConfigError as e:
+        print(f"daemon: ignoring invalid saved settings ({e})", file=sys.stderr)
+        cfg, state.settings = base, {}
+    cfg = replace(cfg, measure_levels=True)  # detection needs the level readings
+    service = Service(cfg)
+    service.metrics.event("service_start", config=cfg.__dict__, mode="daemon",
+                          last_target=state.last_target)  # fmt: skip
+    if not await _start_or_report(service):
+        return 1
+    driver = Driver(
+        service, store, state, service.metrics,
+        lambda name, on_end: CastSession(name, service.metrics, on_end),
+        toml_path=toml_path, cli_overrides={**overrides, "measure_levels": True},
+    )  # fmt: skip
+    service.level_listeners.append(driver.on_level)
+    target = driver.controller.target
+    print(f"Listening on {cfg.source}; on needle drop: cast to {target or '(no speaker yet)'} "
+          f"at {stream_url(cfg)}  (Ctrl-C to stop)", flush=True)  # fmt: skip
+    task = asyncio.create_task(driver.run())
+    try:
+        await _wait_for_signal()
+    finally:
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(driver.shutdown(), 15)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        await service.stop()
+    return 0

@@ -192,6 +192,7 @@ IMPLEMENTED: dict[str, Callable[[Config, argparse.Namespace], int]] = {
     "cast": _cast,
     "stop": _stop,
     "run": _run,
+    "daemon": lambda cfg, args: _daemon(args),
 }
 
 COMMANDS: dict[str, tuple[str, str, bool]] = {
@@ -202,6 +203,7 @@ COMMANDS: dict[str, tuple[str, str, bool]] = {
     "cast": ("Send the stream URL of a running server to a target", "M3", True),
     "stop": ("Stop playback on a target", "M3", True),
     "run": ("serve and cast in one process (soak-test entry point)", "M3", True),
+    "daemon": ("always on: cast to the last speaker on needle drop (revision 1)", "R1", True),
 }
 
 
@@ -227,10 +229,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def config_from_args(args: argparse.Namespace) -> Config:
+def overrides_from_args(args: argparse.Namespace) -> dict[str, object]:
     ns = vars(args)
-    overrides = {k: ns[k] for k in (*CONFIG_KEYS, "cast_target") if k in ns}
-    return load_config(ns.get("config"), overrides)
+    return {k: ns[k] for k in (*CONFIG_KEYS, "cast_target") if k in ns}
+
+
+def config_from_args(args: argparse.Namespace) -> Config:
+    return load_config(vars(args).get("config"), overrides_from_args(args))
+
+
+def _daemon(args: argparse.Namespace) -> int:
+    from vinylcast.service import run_daemon
+
+    return asyncio.run(run_daemon(vars(args).get("config"), overrides_from_args(args)))
 
 
 def main(argv: Sequence[str] | None = None) -> int:

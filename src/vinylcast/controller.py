@@ -146,6 +146,13 @@ class Controller:
         self._go(State.STARTING, "switch" if switching else "manual")
         return [*actions, Cast(self.target, "switch" if switching else "manual")]
 
+    def restart(self, now: float) -> list[Action]:
+        """Re-cast the current speaker (e.g. after a codec change changed the stream URL)."""
+        if self.state not in (State.STARTING, State.PLAYING) or self.target is None:
+            return []
+        self._go(State.STARTING, "restart")
+        return [Cast(self.target, "restart")]
+
     def stop(self, now: float) -> list[Action]:
         self._set_hold(now, "manual")
         if self.state in (State.STARTING, State.PLAYING):

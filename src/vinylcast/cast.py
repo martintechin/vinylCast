@@ -15,13 +15,20 @@ import asyncio
 import contextlib
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 import pychromecast
+from pychromecast.config import APP_BACKDROP, APP_MEDIA_RECEIVER
 from pychromecast.const import CAST_TYPE_GROUP
 from pychromecast.controllers.media import MediaStatus, MediaStatusListener
-from pychromecast.controllers.receiver import LaunchErrorListener, LaunchFailure
+from pychromecast.controllers.receiver import (
+    CastStatus,
+    CastStatusListener,
+    LaunchErrorListener,
+    LaunchFailure,
+)
 from pychromecast.discovery import CastBrowser, SimpleCastListener
 from pychromecast.socket_client import ConnectionStatus, ConnectionStatusListener
 
@@ -76,18 +83,63 @@ def discover(timeout_s: float = DISCOVERY_TIMEOUT_S) -> list[Target]:
     )
 
 
-class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorListener):
+# Why playback ended, in the controller's terms (controller.CastEnd).
+EndReason = str  # "cancelled" | "taken_over" | "error" | "lost"
+IDLE_APPS = (None, APP_BACKDROP)  # pychromecast treats these as "nothing running"
+
+
+def classify_idle(idle_reason: str | None) -> EndReason:
+    """Media went IDLE after playing. CANCELLED = stopped by a user (Google Home app, voice,
+    our own stop); INTERRUPTED = someone loaded other media; FINISHED on an endless stream
+    means the connection to our server ended, so it is treated like ERROR (recoverable)."""
+    if idle_reason == "CANCELLED":
+        return "cancelled"
+    if idle_reason == "INTERRUPTED":
+        return "taken_over"
+    return "error"
+
+
+def classify_app_change(old_app: str | None, new_app: str | None) -> EndReason | None:
+    """Receiver app changed while we were playing in the Default Media Receiver."""
+    if old_app != APP_MEDIA_RECEIVER or new_app == APP_MEDIA_RECEIVER:
+        return None
+    return "cancelled" if new_app in IDLE_APPS else "taken_over"
+
+
+def is_busy(app_id: str | None, content_id: str | None, our_url: str) -> bool:
+    """Would casting now interrupt someone? Free when nothing runs, or when the Default Media
+    Receiver is idle or already playing our own stream."""
+    if app_id in IDLE_APPS:
+        return False
+    if app_id == APP_MEDIA_RECEIVER:
+        return content_id not in (None, our_url)
+    return True
+
+
+class StatusMonitor(
+    MediaStatusListener, ConnectionStatusListener, LaunchErrorListener, CastStatusListener
+):
     """Logs every player-state change, connection change and launch/load error, and
     measures startup latency (play_media sent -> first PLAYING).
 
     Callbacks run on pychromecast threads; `playing` is an asyncio.Event set via the loop.
     """
 
-    def __init__(self, metrics: Metrics, target: str, loop: asyncio.AbstractEventLoop) -> None:
+    def __init__(
+        self,
+        metrics: Metrics,
+        target: str,
+        loop: asyncio.AbstractEventLoop,
+        on_end: Callable[[EndReason], None] | None = None,
+    ) -> None:
         self._metrics = metrics
         self._target = target
         self._loop = loop
+        self._on_end = on_end
         self._lock = threading.Lock()
+        self._app_id: str | None = None
+        self._ended = False
+        self.closing = False  # set before an intended disconnect: not a "lost" connection
         self._last: tuple[str, str | None] | None = None
         self._play_sent: float | None = None
         self.seen_playing = False
@@ -98,6 +150,7 @@ class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorLi
         with self._lock:
             self._play_sent = time.monotonic()
             self.seen_playing = False
+            self._ended = False
             self._last = None
         self._loop.call_soon_threadsafe(self.playing.clear)
 
@@ -132,6 +185,29 @@ class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorLi
             )
         if first_playing:
             self._loop.call_soon_threadsafe(self.playing.set)
+        if status.player_state == "IDLE" and after_playing:
+            self._end(classify_idle(status.idle_reason))
+
+    def _end(self, reason: EndReason) -> None:
+        """Report the end of our playback once per play_media, on the event loop."""
+        with self._lock:
+            if self._ended or not self.seen_playing:
+                return
+            self._ended = True
+        self._metrics.event("cast_ended", target=self._target, reason=reason)
+        if self._on_end is not None:
+            self._loop.call_soon_threadsafe(self._on_end, reason)
+
+    def new_cast_status(self, status: CastStatus) -> None:
+        with self._lock:
+            old, self._app_id = self._app_id, status.app_id
+        if old != status.app_id:
+            self._metrics.event(
+                "cast_app", target=self._target, app_id=status.app_id, app=status.display_name
+            )
+            reason = classify_app_change(old, status.app_id)
+            if reason is not None:
+                self._end(reason)
 
     def load_media_failed(self, queue_item_id: int, error_code: int) -> None:
         self._metrics.event(
@@ -143,6 +219,8 @@ class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorLi
         self._metrics.event(
             "cast_connection", target=self._target, status=status.status, address=address
         )
+        if status.status in ("LOST", "FAILED", "DISCONNECTED") and not self.closing:
+            self._end("lost")
 
     def new_launch_error(self, status: LaunchFailure) -> None:
         self._metrics.event(
@@ -153,9 +231,12 @@ class StatusMonitor(MediaStatusListener, ConnectionStatusListener, LaunchErrorLi
 class CastSession:
     """One connection to a named device or group."""
 
-    def __init__(self, name: str, metrics: Metrics) -> None:
+    def __init__(
+        self, name: str, metrics: Metrics, on_end: Callable[[EndReason], None] | None = None
+    ) -> None:
         self.name = name
         self._metrics = metrics
+        self._on_end = on_end
         self._cast: pychromecast.Chromecast | None = None
         self._browser: CastBrowser | None = None
         self.monitor: StatusMonitor | None = None
@@ -178,13 +259,16 @@ class CastSession:
 
     async def connect(self) -> None:
         loop = asyncio.get_running_loop()
-        self.monitor = StatusMonitor(self._metrics, self.name, loop)
+        self.monitor = StatusMonitor(self._metrics, self.name, loop, self._on_end)
         started = time.monotonic()
         self._cast = await asyncio.to_thread(self._connect_blocking)
         info = self._cast.cast_info
         self._cast.media_controller.register_status_listener(self.monitor)
         self._cast.register_connection_listener(self.monitor)
         self._cast.register_launch_error_listener(self.monitor)
+        self._cast.register_status_listener(self.monitor)  # receiver: running app
+        if self._cast.status is not None:
+            self.monitor.new_cast_status(self._cast.status)
         self._metrics.event(
             "cast_connected",
             target=self.name,
@@ -217,6 +301,31 @@ class CastSession:
             return None
         return self.monitor.startup_latency_s
 
+    def _busy_blocking(self, our_url: str) -> bool:
+        assert self._cast is not None
+        app_id = self._cast.app_id
+        content_id = None
+        if app_id == APP_MEDIA_RECEIVER:
+            mc = self._cast.media_controller
+            mc.update_status()
+            mc.block_until_active(timeout=2)
+            content_id = mc.status.content_id
+        return is_busy(app_id, content_id, our_url)
+
+    async def is_busy(self, our_url: str) -> bool:
+        """True if another app (or someone else's media) is playing on the target."""
+        busy = await asyncio.to_thread(self._busy_blocking, our_url)
+        if busy:
+            assert self._cast is not None
+            self._metrics.event("cast_busy", target=self.name, app_id=self._cast.app_id,
+                                app=self._cast.app_display_name)  # fmt: skip
+        return busy
+
+    async def set_volume(self, level: float) -> float:
+        """Speaker volume 0..1; returns what the receiver reports."""
+        assert self._cast is not None
+        return float(await asyncio.to_thread(self._cast.set_volume, level))
+
     def _stop_blocking(self) -> None:
         assert self._cast is not None
         mc = self._cast.media_controller
@@ -241,6 +350,8 @@ class CastSession:
                 self._browser.stop_discovery()
 
     async def disconnect(self) -> None:
+        if self.monitor is not None:
+            self.monitor.closing = True  # our own disconnect is not a lost connection
         await asyncio.to_thread(self._disconnect_blocking)
         self._cast = None
         self._browser = None

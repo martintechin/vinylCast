@@ -1,0 +1,233 @@
+"""Revision 1 driver: connects detector -> controller -> Cast, plus persistent state.
+
+The controller decides (pure logic); the driver executes its actions one at a time on the
+event loop and feeds the results back: level readings -> detector -> signal_on/off,
+Cast feedback -> cast_started / cast_failed / cast_ended / stopped, `tick` every second.
+Cast operations are serialized through one worker so they never overlap.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import time
+from collections import deque
+from collections.abc import Callable
+from typing import Any, Protocol
+
+from vinylcast.cast import CastError
+from vinylcast.config import Config, load_config, validate_ui_settings
+from vinylcast.controller import Action, Cast, Controller, Notify, Stop
+from vinylcast.detector import Level, SignalDetector
+from vinylcast.metrics import Metrics
+from vinylcast.server import CONTENT_TYPES, stream_url
+from vinylcast.state import PersistentState, StateStore
+
+
+class SessionPort(Protocol):
+    name: str
+
+    async def connect(self) -> None: ...
+    async def is_busy(self, our_url: str) -> bool: ...
+    async def play(self, url: str, content_type: str) -> float | None: ...
+    async def stop(self) -> None: ...
+    async def set_volume(self, level: float) -> float: ...
+    async def disconnect(self) -> None: ...
+
+
+class ServicePort(Protocol):
+    cfg: Config
+
+    async def reconfigure(self, cfg: Config) -> list[str]: ...
+
+
+SessionFactory = Callable[[str, Callable[[str], None]], SessionPort]
+
+
+class Driver:
+    def __init__(
+        self,
+        service: ServicePort,
+        store: StateStore,
+        state: PersistentState,
+        metrics: Metrics,
+        session_factory: SessionFactory,
+        *,
+        toml_path: Any = None,
+        cli_overrides: dict[str, Any] | None = None,
+        url: Callable[[Config], str] = stream_url,
+        clock: Callable[[], float] = time.monotonic,
+        tick_s: float = 1.0,
+    ) -> None:
+        cfg = service.cfg
+        self.service = service
+        self.store = store
+        self.state = state
+        self.metrics = metrics
+        self._factory = session_factory
+        self._toml_path = toml_path
+        self._cli_overrides = cli_overrides or {}
+        self._url = url
+        self._clock = clock
+        self._tick_s = tick_s
+        self.detector = SignalDetector(cfg.detect_threshold_db, on_after_s=cfg.detect_on_s)
+        self.controller = Controller(
+            auto_cast=cfg.auto_cast,
+            stop_after_silence_s=cfg.stop_after_silence_s,
+            recast_max=cfg.recast_max,
+            target=state.last_target or cfg.cast_target,
+            on_transition=lambda a, b, why: metrics.event(
+                "ctl_state", old=a.value, new=b.value, reason=why
+            ),
+        )
+        self.session: SessionPort | None = None
+        self.notifications: deque[dict[str, Any]] = deque(maxlen=20)
+        self._queue: asyncio.Queue[Action] = asyncio.Queue()
+        self._casting = False  # ends reported while we (re)cast are our own doing
+
+    # ------------------------------------------------------------- inputs
+
+    def on_level(self, level: Level) -> None:
+        event = self.detector.feed(level)
+        now = self._clock()
+        if event == "on":
+            self.metrics.event("signal", on=True, rms_db=round(level.rms_db, 1))
+            self._apply(self.controller.signal_on(now))
+        elif event == "off":
+            self.metrics.event("signal", on=False, rms_db=round(level.rms_db, 1))
+            self._apply(self.controller.signal_off(now))
+
+    def _on_end(self, reason: str) -> None:
+        if self._casting:
+            return
+        self._apply(self.controller.cast_ended(self._clock(), reason))  # type: ignore[arg-type]
+
+    def _apply(self, actions: list[Action]) -> None:
+        for action in actions:
+            self._queue.put_nowait(action)
+
+    # ------------------------------------------------------------- commands (UI / CLI)
+
+    def play(self, target: str | None = None) -> None:
+        self._apply(self.controller.play(self._clock(), target))
+
+    def stop(self) -> None:
+        self._apply(self.controller.stop(self._clock()))
+
+    async def set_volume(self, level: float) -> float | None:
+        if self.session is None:
+            return None
+        return await self.session.set_volume(level)
+
+    async def apply_settings(self, settings: dict[str, Any]) -> Config:
+        """Validate, persist and apply UI settings. A stream change re-casts if playing."""
+        merged = validate_ui_settings({**self.state.settings, **settings})
+        cfg = load_config(self._toml_path, self._cli_overrides, merged)
+        self.state.settings = merged
+        self._save()
+        changed = await self.service.reconfigure(cfg)
+        c = self.controller
+        c.auto_cast, c.stop_after_silence_s = cfg.auto_cast, cfg.stop_after_silence_s
+        c.recast_max = cfg.recast_max
+        self.detector.threshold_db, self.detector.on_after_s = (
+            cfg.detect_threshold_db, cfg.detect_on_s)  # fmt: skip
+        self.metrics.event("settings_applied", settings=settings, stream_changed=changed)
+        if changed:
+            self._apply(c.restart(self._clock()))
+        return cfg
+
+    # ------------------------------------------------------------- execution
+
+    async def run(self) -> None:
+        ticker = asyncio.create_task(self._ticker())
+        try:
+            while True:
+                action = await self._queue.get()
+                try:
+                    await self._execute(action)
+                except Exception as e:  # never let one failed action stop the driver
+                    self.metrics.event("driver_error", action=repr(action), error=repr(e))
+        finally:
+            ticker.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await ticker
+
+    async def _ticker(self) -> None:
+        while True:
+            await asyncio.sleep(self._tick_s)
+            self._apply(self.controller.tick(self._clock()))
+
+    async def _execute(self, action: Action) -> None:
+        if isinstance(action, Notify):
+            self.notifications.append({"ts": time.time(), "level": action.level,
+                                       "message": action.message})  # fmt: skip
+            self.metrics.event("notify", level=action.level, message=action.message)
+        elif isinstance(action, Stop):
+            await self._stop_session()
+            self._apply(self.controller.stopped(self._clock()))
+        elif isinstance(action, Cast):
+            await self._cast(action)
+
+    async def _stop_session(self) -> None:
+        if self.session is not None:
+            with contextlib.suppress(Exception):
+                await self.session.stop()
+
+    async def _cast(self, action: Cast) -> None:
+        cfg = self.service.cfg
+        url = self._url(cfg)
+        self._casting = True
+        try:
+            if self.session is not None and self.session.name != action.target:
+                await self.session.disconnect()
+                self.session = None
+            if self.session is None:
+                session = self._factory(action.target, self._on_end)
+                try:
+                    await session.connect()
+                except CastError:
+                    self._apply(self.controller.cast_failed(self._clock(), "not_found"))
+                    return
+                self.session = session
+            if await self.session.is_busy(url):
+                self._apply(self.controller.cast_failed(self._clock(), "busy"))
+                return
+            latency = await self.session.play(url, CONTENT_TYPES[cfg.codec])
+        except Exception as e:
+            self.metrics.event("driver_error", action=repr(action), error=repr(e))
+            self._apply(self.controller.cast_failed(self._clock(), "error"))
+            return
+        finally:
+            self._casting = False
+        if latency is None:
+            self._apply(self.controller.cast_failed(self._clock(), "error"))
+            return
+        self._apply(self.controller.cast_started(self._clock()))
+        if self.state.last_target != action.target:
+            self.state.last_target = action.target
+            self._save()
+
+    def _save(self) -> None:
+        self.state.last_target = self.controller.target or self.state.last_target
+        self.store.save(self.state)
+
+    async def shutdown(self) -> None:
+        """Stop playback (if any) and disconnect; used when the daemon exits."""
+        if self.controller.state.value in ("starting", "playing"):
+            await self._stop_session()
+        if self.session is not None:
+            await self.session.disconnect()
+            self.session = None
+
+    def status(self) -> dict[str, Any]:
+        latest = self.detector.latest
+        return {
+            "state": self.controller.state.value,
+            "target": self.controller.target,
+            "hold": self.controller.hold,
+            "signal": self.controller.signal,
+            "auto_cast": self.controller.auto_cast,
+            "level": None if latest is None else
+                {"rms_db": round(latest.rms_db, 1), "peak_db": round(latest.peak_db, 1)},
+            "notifications": list(self.notifications)[-5:],
+        }  # fmt: skip

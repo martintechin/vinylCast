@@ -13,7 +13,7 @@ def test_help_lists_all_subcommands() -> None:
     ).stdout
     for name in ("devices", "levels", "serve", "cast", "stop", "run"):
         assert name in out
-    assert len(COMMANDS) == 6
+    assert len(COMMANDS) == 7  # six PoC commands + daemon (revision 1)
 
 
 def test_every_command_is_implemented() -> None:
