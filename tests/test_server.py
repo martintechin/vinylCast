@@ -208,3 +208,23 @@ async def test_stalled_client_dropped_at_real_rate(tmp_path: Path) -> None:
         sock.close()
         task.cancel()
         await server.stop()
+
+
+async def test_port_in_use_reports_cleanly(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from vinylcast.service import run_serve
+
+    blocker = socket.socket()
+    blocker.bind(("0.0.0.0", 0))
+    blocker.listen()
+    port = blocker.getsockname()[1]
+    try:
+        cfg = load_config(overrides={"source": "tone", "http_port": port,
+                                     "metrics_path": str(tmp_path / "m.jsonl")})  # fmt: skip
+        assert await run_serve(cfg) == 1
+    finally:
+        blocker.close()
+    err = capsys.readouterr().err
+    assert f"Cannot listen on port {port}" in err and "Traceback" not in err
+    assert events(tmp_path / "m.jsonl", "server_bind_failed")

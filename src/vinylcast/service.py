@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import signal
+import sys
 from typing import Any
 
 from vinylcast.config import Config
@@ -82,10 +83,30 @@ class Service:
         self.metrics.close()
 
 
+async def _start_or_report(service: Service) -> bool:
+    """Start the service; on a bind failure (port in use) print one clear line instead of
+    a traceback, log it, clean up and return False."""
+    try:
+        await service.start()
+    except OSError as e:
+        port = service.cfg.http_port
+        service.metrics.event("server_bind_failed", port=port, error=str(e))
+        print(
+            f"Cannot listen on port {port}: {e.strerror or e}. Another VinylCast running? "
+            f"Check with: pgrep -af vinylcast",
+            file=sys.stderr,
+            flush=True,
+        )
+        await service.stop()
+        return False
+    return True
+
+
 async def run_serve(cfg: Config) -> int:
     service = Service(cfg)
     service.metrics.event("service_start", config=cfg.__dict__)
-    await service.start()
+    if not await _start_or_report(service):
+        return 1
     print(f"Streaming at {stream_url(cfg)}  (Ctrl-C to stop)", flush=True)
     try:
         await _wait_for_signal()
@@ -111,7 +132,8 @@ async def run_cast(cfg: Config) -> int:
     assert cfg.cast_target is not None
     service = Service(cfg)
     service.metrics.event("service_start", config=cfg.__dict__, mode="run")
-    await service.start()
+    if not await _start_or_report(service):
+        return 1
     url = stream_url(cfg)
     print(f"Streaming at {url}", flush=True)
     session = CastSession(cfg.cast_target, service.metrics)
