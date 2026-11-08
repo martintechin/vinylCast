@@ -76,7 +76,8 @@ async def test_stall_triggers_restart(tmp_path: Path) -> None:
     )
     async with running(enc):
         await wait_until(lambda: enc.restarts >= 1)
-    assert events(path, "encoder_stall")[0]["returncode"] == -signal.SIGKILL
+    # Stopped gently: SIGTERM first (ffmpeg closes ALSA cleanly), SIGKILL only after a grace period.
+    assert events(path, "encoder_stall")[0]["returncode"] == -signal.SIGTERM
 
 
 async def test_backoff_sequence(tmp_path: Path) -> None:
@@ -132,3 +133,16 @@ async def test_device_busy_is_not_an_xrun(tmp_path: Path) -> None:
         await wait_until(lambda: enc.restarts >= 1)
     assert [e["line"] for e in events(path, "ffmpeg_xrun")] == [lines[2]]
     assert len(events(path, "ffmpeg_warning")) == 2
+
+
+@requires_ffmpeg
+async def test_clean_stop_logs_no_warnings(tmp_path: Path) -> None:
+    path = tmp_path / "m.jsonl"
+    enc = Encoder(
+        build_command(load_config(overrides={"source": "tone"})), Collector(), Metrics(path)
+    )
+    async with running(enc):
+        await wait_until(lambda: enc.state == EncoderState.RUNNING)
+        await asyncio.sleep(0.5)
+    assert events(path, "ffmpeg_warning") == []
+    assert events(path, "encoder_exit") == [] and events(path, "encoder_restart") == []

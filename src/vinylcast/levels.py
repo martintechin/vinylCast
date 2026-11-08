@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 
 from vinylcast import source
 from vinylcast.config import Config
+from vinylcast.metrics import Metrics
 
 CLIP_WARN_DBFS = -1.0
 # Readings come from ametadata's log output on stderr ("[Parsed_ametadata_3 @ 0x..] frame:..").
@@ -172,3 +173,34 @@ async def run_levels(cfg: Config, duration_s: float | None = None) -> int:
     print(f"Loudest peak: {loudest:.1f} dBFS; seconds above {CLIP_WARN_DBFS:g} dBFS: {over}",
           flush=True)  # fmt: skip
     return 0
+
+
+class PeakLogger:
+    """Turns the encoder's info-level peak lines into `input_peak` events, one per block.
+    A block is emitted when the next block's frame line arrives (the last block of a
+    process is dropped; at 10 s blocks that is irrelevant for a soak summary)."""
+
+    def __init__(self, metrics: Metrics) -> None:
+        self._metrics = metrics
+        self._pending: list[str] = []
+
+    def feed(self, line: str) -> None:
+        if _FRAME.search(line):
+            self.flush()
+            self._pending = [line]
+        elif _STAT.search(line) and self._pending:
+            self._pending.append(line)
+
+    def flush(self) -> None:
+        if len(self._pending) > 1:
+            r = from_block(self._pending)
+            self._metrics.event(
+                "input_peak",
+                t=r.t,
+                peak_db=None if r.max_peak == -math.inf else round(r.max_peak, 2),
+                channels={
+                    str(c): (None if v == -math.inf else round(v, 2)) for c, v in r.peak.items()
+                },
+                clip_risk=r.clipping_risk,
+            )
+        self._pending = []

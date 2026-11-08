@@ -31,7 +31,8 @@ def _common_parser() -> argparse.ArgumentParser:
     g.add_argument("--http-port", type=int)
     g.add_argument("--advertise-ip", help='IP for the stream URL, or "auto"')
     g.add_argument("--client-max-buffer-s", type=float)
-    g.add_argument("--metrics-path")
+    g.add_argument("--peak-log-s", type=float, help="log input peak every N s (0 = off)")
+    g.add_argument("--metrics-path", help="JSONL log; strftime codes allowed (%%Y%%m%%d-%%H%%M)")
     return p
 
 
@@ -46,6 +47,7 @@ CONFIG_KEYS = (
     "http_port",
     "advertise_ip",
     "client_max_buffer_s",
+    "peak_log_s",
     "metrics_path",
 )
 

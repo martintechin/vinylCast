@@ -31,7 +31,8 @@ class Config:
     advertise_ip: str | None = None  # None = auto-detect from the default route
     cast_target: str | None = None
     client_max_buffer_s: float = 10.0
-    metrics_path: str = "./metrics.jsonl"
+    peak_log_s: float = 10.0  # input peak logged every N s by the encoder's ffmpeg; 0 = off
+    metrics_path: str = "./metrics.jsonl"  # strftime codes allowed, e.g. soak-%Y%m%d-%H%M.jsonl
 
     @property
     def mp3_bitrate_bps(self) -> int:
@@ -50,6 +51,7 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "advertise_ip": (str,),
     "cast_target": (str,),
     "client_max_buffer_s": (int, float),
+    "peak_log_s": (int, float),
     "metrics_path": (str,),
 }
 assert set(_TYPES) == {f.name for f in fields(Config)}
@@ -68,7 +70,7 @@ def _coerce(values: dict[str, Any], origin: str) -> dict[str, Any]:
             raise ConfigError(f"{origin}: {key} has wrong type {type(value).__name__}")
         if key == "advertise_ip" and value == "auto":
             value = None
-        if key in ("client_max_buffer_s", "tone_beep_s"):
+        if key in ("client_max_buffer_s", "tone_beep_s", "peak_log_s"):
             value = float(value)
         out[key] = value
     return out
@@ -89,6 +91,8 @@ def _validate(cfg: Config) -> None:
         raise ConfigError(f"mp3_bitrate must look like '320k', got {cfg.mp3_bitrate!r}")
     if cfg.tone_beep_s < 0:
         raise ConfigError(f"tone_beep_s must be >= 0: {cfg.tone_beep_s}")
+    if cfg.peak_log_s < 0:
+        raise ConfigError(f"peak_log_s must be >= 0: {cfg.peak_log_s}")
     if cfg.client_max_buffer_s <= 0:
         raise ConfigError(f"client_max_buffer_s must be positive: {cfg.client_max_buffer_s}")
 

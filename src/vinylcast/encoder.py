@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
 from collections.abc import Callable, Sequence
 from enum import StrEnum
@@ -27,6 +28,9 @@ CHUNK_SIZE = 8192
 # Only real capture dropouts. "Input/output error" is NOT one: ffmpeg also prints it when the
 # device cannot be opened (e.g. busy), which must not count as an xrun in the soak summary.
 XRUN_MARKERS = ("xrun", "overrun", "underrun")
+_LEVEL_TAG = re.compile(r"\[(quiet|panic|fatal|error|warning|info|verbose|debug|trace)\] ")
+_REPORTED_LEVELS = ("panic", "fatal", "error", "warning")
+TERMINATE_GRACE_S = 2.0
 
 
 def codec_args(cfg: Config) -> list[str]:
@@ -43,11 +47,29 @@ def codec_args(cfg: Config) -> list[str]:
     raise ValueError(f"unknown codec {cfg.codec!r}")
 
 
+def peak_filter_args(cfg: Config) -> list[str]:
+    """Measure the input peak per `peak_log_s` block in a separate branch (asplit), so the
+    encoder itself still gets audio without added latency. Results are info-level log lines
+    ("[info] lavfi.astats.N.Peak_level=..."), parsed by levels.PeakLogger."""
+    if cfg.peak_log_s <= 0:
+        return []
+    block = max(1, round(cfg.sample_rate * cfg.peak_log_s))
+    graph = (
+        "[0:a]asplit=2[enc][m];"
+        f"[m]asetnsamples=n={block}:p=0,"
+        "astats=metadata=1:reset=1:measure_perchannel=Peak_level:measure_overall=none,"
+        "ametadata=mode=print,anullsink"
+    )
+    return ["-filter_complex", graph, "-map", "[enc]"]
+
+
 def build_command(cfg: Config, ffmpeg: str = "ffmpeg") -> list[str]:
+    # level+info: every log line carries "[info]" / "[warning]" / "[error]" so warnings can be
+    # told apart from the info-level peak lines.
     return [
-        ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "warning",
-        *source.input_args(cfg), *source.output_args(cfg), *codec_args(cfg),
-        "pipe:1",
+        ffmpeg, "-hide_banner", "-nostdin", "-nostats", "-loglevel", "level+info",
+        *source.input_args(cfg), *peak_filter_args(cfg), *source.output_args(cfg),
+        *codec_args(cfg), "pipe:1",
     ]  # fmt: skip
 
 
@@ -71,6 +93,7 @@ class Encoder:
         stable_after_s: float = STABLE_AFTER_S,
         chunk_size: int = CHUNK_SIZE,
         on_start: Callable[[], None] | None = None,
+        on_info: Callable[[str], None] | None = None,
     ) -> None:
         self._cmd = list(cmd)
         self._sink = sink
@@ -80,6 +103,7 @@ class Encoder:
         self._stable_after_s = stable_after_s
         self._chunk_size = chunk_size
         self._on_start = on_start
+        self._on_info = on_info  # info-level ffmpeg lines (peak measurements)
         self._proc: asyncio.subprocess.Process | None = None
         self._stopping = asyncio.Event()
         self.state = EncoderState.IDLE
@@ -139,14 +163,24 @@ class Encoder:
         try:
             reason = await self._pump(proc)
         finally:
-            if proc.returncode is None:
-                with contextlib.suppress(ProcessLookupError):
-                    proc.kill()
+            await self._terminate(proc)
             returncode = await proc.wait()
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(stderr_task, 1.0)
             stderr_task.cancel()
         return reason, returncode
+
+    async def _terminate(self, proc: asyncio.subprocess.Process) -> None:
+        """SIGTERM first so ffmpeg closes ALSA cleanly; SIGKILL if it does not exit in time."""
+        if proc.returncode is not None:
+            return
+        with contextlib.suppress(ProcessLookupError):
+            proc.terminate()
+        try:
+            await asyncio.wait_for(proc.wait(), TERMINATE_GRACE_S)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
 
     async def _pump(self, proc: asyncio.subprocess.Process) -> str:
         assert proc.stdout is not None
@@ -165,9 +199,19 @@ class Encoder:
 
     async def _read_stderr(self, proc: asyncio.subprocess.Process) -> None:
         assert proc.stderr is not None
+        level = "warning"  # untagged lines (continuations, other tools) count as warnings
         async for raw in proc.stderr:
             line = raw.decode(errors="replace").strip()
             if not line:
+                continue
+            if m := _LEVEL_TAG.search(line):
+                level = m.group(1)
+                line = line[: m.start()] + line[m.end() :]
+            if self._stopping.is_set():
+                continue  # "Immediate exit requested" etc. while we stop it: not warnings
+            if level not in _REPORTED_LEVELS:
+                if self._on_info is not None:
+                    self._on_info(line)
                 continue
             kind = (
                 "ffmpeg_xrun" if any(m in line.lower() for m in XRUN_MARKERS) else "ffmpeg_warning"
@@ -179,4 +223,4 @@ class Encoder:
         proc = self._proc
         if proc is not None and proc.returncode is None:
             with contextlib.suppress(ProcessLookupError):
-                proc.kill()
+                proc.terminate()  # _run_once escalates to SIGKILL after TERMINATE_GRACE_S

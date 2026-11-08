@@ -7,6 +7,7 @@ for events, `event` (the event name). Events are also echoed to the `vinylcast` 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -23,7 +24,8 @@ log = logging.getLogger("vinylcast")
 
 class Metrics:
     def __init__(self, path: str | Path | None) -> None:
-        self.path = Path(path) if path is not None else None
+        # strftime codes give one file per run, e.g. "soak-%Y%m%d-%H%M.jsonl"
+        self.path = Path(time.strftime(str(path))) if path is not None else None
         self._fh = self.path.open("a", buffering=1, encoding="utf-8") if self.path else None
         self._lock = threading.Lock()  # pychromecast callbacks log from their own threads
 
@@ -38,7 +40,10 @@ class Metrics:
         log.info("%s %s", name, " ".join(f"{k}={v}" for k, v in fields.items()))
 
     def sample(self, **fields: Any) -> None:
-        self._write({"ts": round(time.time(), 3), "kind": "sample", **fields})
+        self.write_record("sample", **fields)
+
+    def write_record(self, kind: str, **fields: Any) -> None:
+        self._write({"ts": round(time.time(), 3), "kind": kind, **fields})
 
     def close(self) -> None:
         with self._lock:
@@ -113,3 +118,108 @@ class Sampler:
                 ffmpeg=_proc_stats(ffmpeg, fresh),
                 **self._state(),
             )
+
+
+async def _run(*cmd: str, timeout_s: float = 5.0) -> str | None:
+    """Output of a small system command, or None if it is missing, fails or hangs."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+    try:
+        out, _ = await asyncio.wait_for(proc.communicate(), timeout_s)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
+        return None
+    return out.decode(errors="replace") if proc.returncode == 0 else None
+
+
+def default_route_interface(route_table: str | None = None) -> str | None:
+    """Interface of the IPv4 default route, from /proc/net/route."""
+    if route_table is None:
+        try:
+            route_table = Path("/proc/net/route").read_text()
+        except OSError:
+            return None
+    for line in route_table.splitlines()[1:]:
+        fields = line.split()
+        if len(fields) > 1 and fields[1] == "00000000":
+            return fields[0]
+    return None
+
+
+def is_wireless(iface: str) -> bool:
+    return Path(f"/sys/class/net/{iface}/wireless").exists()
+
+
+def parse_throttled(text: str | None) -> int | None:
+    """`vcgencmd get_throttled` -> 'throttled=0x50005' -> 0x50005."""
+    if not text or "=" not in text:
+        return None
+    try:
+        return int(text.strip().split("=", 1)[1], 16)
+    except ValueError:
+        return None
+
+
+def parse_iw_link(text: str | None) -> dict[str, Any] | None:
+    """`iw dev <if> link` -> {connected, freq_mhz, signal_dbm, tx_mbit, rx_mbit}."""
+    if text is None:
+        return None
+    if text.strip().startswith("Not connected"):
+        return {"connected": False}
+    out: dict[str, Any] = {"connected": True}
+    for raw in text.splitlines():
+        key, _, value = raw.strip().partition(":")
+        value = value.strip()
+        with contextlib.suppress(ValueError, IndexError):
+            if key == "freq":
+                out["freq_mhz"] = float(value.split()[0])
+            elif key == "signal":
+                out["signal_dbm"] = int(value.split()[0])
+            elif key == "tx bitrate":
+                out["tx_mbit"] = float(value.split()[0])
+            elif key == "rx bitrate":
+                out["rx_mbit"] = float(value.split()[0])
+    return out
+
+
+class PiHealth:
+    """Every `interval_s`: `vcgencmd get_throttled` (Pi only) and, when the default route is
+    Wi-Fi, the link's signal and bitrates. Writes a `health` record each time, and a
+    `pi_throttled` event for any non-zero value (under-voltage / thermal throttling must show
+    up in the data). Missing tools (dev machine) just give nulls."""
+
+    def __init__(self, metrics: Metrics, interval_s: float = 60.0) -> None:
+        self._metrics = metrics
+        self._interval_s = interval_s
+
+    async def collect(self) -> dict[str, Any]:
+        throttled = parse_throttled(await _run("vcgencmd", "get_throttled"))
+        iface = default_route_interface()
+        wifi = None
+        if iface and is_wireless(iface):
+            wifi = parse_iw_link(await _run("iw", "dev", iface, "link"))
+            ps = await _run("iw", "dev", iface, "get", "power_save")
+            if wifi is not None and ps is not None:
+                wifi["power_save"] = ps.strip().endswith("on")
+        return {
+            "throttled": None if throttled is None else hex(throttled),
+            "net_iface": iface,
+            "wifi": wifi,
+        }
+
+    async def run(self) -> None:
+        while True:
+            health = await self.collect()
+            self._metrics.write_record("health", **health)
+            if health["throttled"] not in (None, "0x0"):
+                self._metrics.event("pi_throttled", value=health["throttled"])
+            await asyncio.sleep(self._interval_s)

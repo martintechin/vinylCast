@@ -3,8 +3,18 @@
 PoC: turntable → phono preamp → Behringer UFO202 → Raspberry Pi 3 → HTTP audio stream → Chromecast device or Cast group.
 See [PLAN.md](PLAN.md) for scope, milestones and acceptance criteria.
 
-Status: **M4 (on the Pi), code done, hardware acceptance pending.** M3 passed on a single
-device (Nest Mini); group checks open (no group yet).
+Status: **M5 (soak test), code done, 60-minute run pending.** M4 passed (loudest-passage
+check on available records only: -10.3 dBFS; re-check with a loud record). M3 passed on a
+single device (Nest Mini); group checks open (no group yet).
+
+## Soak test
+
+```sh
+# vinylcast.toml: source, codec, cast_target, metrics_path = "./soak-%Y%m%d-%H%M.jsonl"
+sudo systemctl start vinylcast        # play for 60+ min; note audible gaps with times
+sudo systemctl stop vinylcast
+python scripts/soak_summary.py soak-*.jsonl   # PASS/FAIL against PLAN.md M5
+```
 
 ## On the Pi
 

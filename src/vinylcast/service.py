@@ -15,7 +15,8 @@ from vinylcast.config import Config
 from vinylcast.encoder import Encoder, build_command
 from vinylcast.framing import make_framer
 from vinylcast.hub import Hub
-from vinylcast.metrics import Metrics, Sampler
+from vinylcast.levels import PeakLogger
+from vinylcast.metrics import Metrics, PiHealth, Sampler
 from vinylcast.server import StreamServer, stream_url
 
 
@@ -25,11 +26,13 @@ class Service:
         self.metrics = Metrics(cfg.metrics_path)
         self.hub = Hub(cfg.client_max_buffer_s, self.metrics)
         self.framer = make_framer(cfg.codec, self._on_flac_header)
+        self.peaks = PeakLogger(self.metrics)
         self.encoder = Encoder(
             build_command(cfg),
             self._on_chunk,
             self.metrics,
             on_start=self._on_encoder_start,
+            on_info=self.peaks.feed,
             **encoder_kw,
         )
         self.server = StreamServer(
@@ -38,6 +41,7 @@ class Service:
         self.sampler = Sampler(
             self.metrics, self.hub.stats, lambda: self.encoder.pid, sample_interval_s
         )
+        self.health = PiHealth(self.metrics)
         self._tasks: list[asyncio.Task[None]] = []
 
     def _on_chunk(self, data: bytes) -> None:
@@ -51,6 +55,7 @@ class Service:
 
     def _on_encoder_start(self) -> None:
         self.framer.reset()
+        self.peaks.flush()
 
     def _on_flac_header(self, header: bytes, old: bytes | None) -> None:
         if old is None:
@@ -67,6 +72,7 @@ class Service:
         self._tasks = [
             asyncio.create_task(self.encoder.run(), name="encoder"),
             asyncio.create_task(self.sampler.run(), name="sampler"),
+            asyncio.create_task(self.health.run(), name="pi-health"),
         ]
         return bound
 

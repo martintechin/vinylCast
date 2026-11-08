@@ -21,6 +21,7 @@ vinylcast levels --source tone --duration 3    # level meter (astats); on the Pi
 scripts/deploy.sh                              # ON THE PI: pull, install, systemd unit
 python -m vinylcast --help                     # all subcommands; unimplemented ones exit 3
 python scripts/bench_framing.py 20             # framing CPU cost per codec
+python scripts/soak_summary.py FILE.jsonl      # soak verdict (logic in vinylcast/soak.py)
 tests/fixtures/make_fixtures.sh                # regenerate framing fixtures (ffmpeg)
 ```
 
@@ -89,6 +90,15 @@ UFO202 (measured): card CODEC, USB full speed, native capture S16_LE stereo at 4
 22050/16000/11025 Hz. Default device is `hw:CARD=CODEC,DEV=0` (not plughw) so an unsupported
 rate fails instead of being resampled by ALSA. The systemd unit (deploy/vinylcast.service, a
 template filled by deploy.sh) runs `vinylcast run --config vinylcast.toml` and stops with SIGINT.
+
+Pi (measured): Raspberry Pi 3 Model B Rev 1.2 -> Wi-Fi 2.4 GHz only. It runs on Wi-Fi (no
+Ethernet at the turntable; Martin's decision, deviating from PLAN.md's Ethernet-first soak), so
+M5 logs `health` records every 60 s (get_throttled, Wi-Fi signal/bitrate/power save) and the
+summary counts kernel "Data may have been lost" USB messages, to separate USB-capture from
+Wi-Fi problems. The encoder's ffmpeg also measures input peaks in an asplit branch
+(`peak_log_s`, `input_peak` events) and logs at `level+info`: only warning/error lines become
+`ffmpeg_warning`/`ffmpeg_xrun`; info lines go to `on_info`; stderr is ignored once we stop it.
+ffmpeg runs in its own session and is stopped SIGTERM -> SIGKILL (clean ALSA close).
 
 Observed receiver behaviour (Nest Mini, "Cast Lite", M3): GET only, HTTP/1.1 keep-alive, no Range,
 no HEAD, no Icy-MetaData; sends Accept-Encoding gzip/deflate, so never enable compression. Chunked
