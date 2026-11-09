@@ -24,6 +24,8 @@ from vinylcast.metrics import Metrics
 from vinylcast.server import CONTENT_TYPES, stream_url
 from vinylcast.state import PersistentState, StateStore
 
+STALE_INPUT_S = 3.0  # no level readings for this long = silence (input gone)
+
 
 class SessionPort(Protocol):
     name: str
@@ -179,7 +181,14 @@ class Driver:
     async def _ticker(self) -> None:
         while True:
             await asyncio.sleep(self._tick_s)
-            self._apply(self.controller.tick(self._clock()))
+            now = self._clock()
+            latest = self.detector.latest
+            if self.detector.signal and (latest is None or now - latest.t > STALE_INPUT_S):
+                if self.detector.force_off() == "off":
+                    age = None if latest is None else round(now - latest.t, 1)
+                    self.metrics.event("signal_stale", seconds_without_readings=age)
+                    self._apply(self.controller.signal_off(now))
+            self._apply(self.controller.tick(now))
 
     async def _execute(self, action: Action) -> None:
         if isinstance(action, Notify):
@@ -204,15 +213,20 @@ class Driver:
         url = self._url(cfg)
         self._casting = True
         try:
-            if self.session is not None and self.session.name != action.target:
-                await self.session.disconnect()
-                self.session = None
+            # A recovery always starts from a fresh connection: after a speaker power cycle or a
+            # Wi-Fi outage the old one may be dead or half-open.
+            if self.session is not None and (
+                self.session.name != action.target or action.reason == "recover"
+            ):
+                await self._drop_session()
             if self.session is None:
                 sid = next(self._sids)
                 session = self._factory(action.target, lambda why, sid=sid: self._on_end(sid, why))
                 try:
                     await session.connect()
                 except CastError:
+                    with contextlib.suppress(Exception):
+                        await session.disconnect()
                     self._apply(self.controller.cast_failed(self._clock(), "not_found"))
                     return
                 self.session, self._active_sid = session, sid
@@ -224,17 +238,25 @@ class Driver:
             latency = await self.session.play(url, CONTENT_TYPES[cfg.codec])
         except Exception as e:
             self.metrics.event("driver_error", action=repr(action), error=repr(e))
+            await self._drop_session()
             self._apply(self.controller.cast_failed(self._clock(), "error"))
             return
         finally:
             self._casting = False
         if latency is None:
+            await self._drop_session()  # the next attempt reconnects from scratch
             self._apply(self.controller.cast_failed(self._clock(), "error"))
             return
         self._apply(self.controller.cast_started(self._clock()))
         if self.state.last_target != action.target:
             self.state.last_target = action.target
             self._save()
+
+    async def _drop_session(self) -> None:
+        if self.session is not None:
+            with contextlib.suppress(Exception):
+                await self.session.disconnect()
+        self.session, self._active_sid = None, None
 
     def _save(self) -> None:
         self.state.last_target = self.controller.target or self.state.last_target
@@ -256,6 +278,7 @@ class Driver:
             "hold": self.controller.hold,
             "signal": self.controller.signal,
             "auto_cast": self.controller.auto_cast,
+            "recovering": self.controller.recovering,
             # Volume of the connected speaker (None without a connection); after a speaker
             # switch this is the new speaker's own value (Martin: the slider must follow it).
             "volume": self.session.volume if self.session is not None else None,

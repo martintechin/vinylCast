@@ -99,7 +99,8 @@ listeners the hub just discards frames.
 | User stops via web UI, CLI, Google Home app or voice | `MANUAL_HOLD`: no auto-cast until a full silence period has passed (next record) |
 | Last speaker is busy with another app (e.g. Spotify) | Do not take it over; show "speaker busy" in the UI |
 | Last speaker not found | Retry discovery for 30 s, then show "speaker unavailable" |
-| Receiver goes IDLE/ERROR or connection lost while signal is present | Re-cast, at most 3 times per 10 min, then stop and show the error |
+| Receiver goes IDLE/ERROR or connection lost while signal is present | Recovery phase: re-cast at once, then retry after 2/5/10/20/30 s (fresh connection each time) for up to 5 min while the music continues; at most 3 phases per 10 min, then stop and show the error |
+| No level readings for 3 s (input unplugged, ffmpeg cannot open it) | Treated as silence (stops after the silence timeout) |
 | Auto-cast disabled in settings | Detection still runs (levels in UI), no automatic casting |
 
 ## Component specifications

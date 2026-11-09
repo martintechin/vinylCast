@@ -11,8 +11,11 @@ second for the silence timer. Rules (docs/PLAN-rev1.md, "Auto-cast rules"):
 - Manual stop (here, or the receiver reports CANCELLED / another app took over) -> hold:
   no auto-cast until the input has been silent for a full `stop_after_silence_s`.
 - Speaker busy or not found -> Notify + hold (no retry loop on every track).
-- Receiver error / connection lost while there is signal -> re-cast, at most `recast_max`
-  times per `recast_window_s`; beyond that Notify + hold.
+- Receiver error / connection lost while there is signal -> a recovery phase: re-cast at once,
+  then retry after RETRY_DELAYS_S (2, 5, 10, 20, 30, 30 ... s) while the record keeps playing,
+  for at most `recover_timeout_s` (speaker power-cycled, Wi-Fi access point restarted). It ends
+  on success, when the music stops, on a manual play/stop, or if someone else took the speaker
+  (busy). At most `recast_max` recovery phases per `recast_window_s`; beyond that Notify + hold.
 - Auto-cast disabled -> no automatic Cast and no automatic Stop; manual play/stop work.
 """
 
@@ -23,6 +26,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal
+
+RETRY_DELAYS_S = (2.0, 5.0, 10.0, 20.0, 30.0)
 
 
 class State(StrEnum):
@@ -63,6 +68,7 @@ class Controller:
         stop_after_silence_s: float = 180.0,
         recast_max: int = 3,
         recast_window_s: float = 600.0,
+        recover_timeout_s: float = 300.0,
         target: str | None = None,
         on_transition: TransitionHook | None = None,
     ) -> None:
@@ -70,6 +76,7 @@ class Controller:
         self.stop_after_silence_s = stop_after_silence_s
         self.recast_max = recast_max
         self.recast_window_s = recast_window_s
+        self.recover_timeout_s = recover_timeout_s
         self.target = target
         self._on_transition = on_transition
         self.state = State.IDLE
@@ -77,7 +84,14 @@ class Controller:
         self.silence_since: float | None = None
         self.hold: str | None = None  # "manual" | "taken_over" | "busy" | "unavailable" | "errors"
         self._hold_since: float | None = None
-        self._recasts: deque[float] = deque()
+        self._recasts: deque[float] = deque()  # starts of recovery phases (budget)
+        self.recovering_since: float | None = None
+        self._retry_at: float | None = None
+        self._retries = 0
+
+    @property
+    def recovering(self) -> bool:
+        return self.recovering_since is not None
 
     # ---------------------------------------------------------------- helpers
 
@@ -88,6 +102,16 @@ class Controller:
 
     def _set_hold(self, now: float, reason: str) -> None:
         self.hold, self._hold_since = reason, now
+
+    def _end_recovery(self) -> None:
+        self.recovering_since = self._retry_at = None
+        self._retries = 0
+
+    def _give_up(self, now: float, why: str) -> list[Action]:
+        self._end_recovery()
+        self._go(State.IDLE, f"gave up: {why}")
+        self._set_hold(now, "errors")
+        return [Notify("error", f"Playback on {self.target} failed ({why}); gave up")]
 
     def _silent_for(self, now: float) -> float:
         if self.signal or self.silence_since is None:
@@ -107,10 +131,20 @@ class Controller:
 
     def signal_off(self, now: float) -> list[Action]:
         self.signal, self.silence_since = False, now
+        if self.recovering and self.state == State.IDLE:
+            self._end_recovery()  # the record ended while we were reconnecting: nothing to resume
         return []
 
     def tick(self, now: float) -> list[Action]:
         actions: list[Action] = []
+        if self.recovering and self.state == State.IDLE and self._retry_at is not None:
+            assert self.recovering_since is not None
+            if now - self.recovering_since >= self.recover_timeout_s:
+                return self._give_up(now, "speaker unreachable")
+            if now >= self._retry_at and self.signal and self.target:
+                self._retry_at = None
+                self._go(State.STARTING, f"retry {self._retries}")
+                return [Cast(self.target, "recover")]
         if self.hold is not None and not self.signal and self.silence_since is not None:
             # A full silence period after the hold started ends it (next record).
             assert self._hold_since is not None
@@ -140,6 +174,7 @@ class Controller:
         if self.target is None:
             return [Notify("warning", "Choose a speaker first")]
         self.hold = self._hold_since = None
+        self._end_recovery()
         if self.state in (State.STARTING, State.PLAYING) and not switching:
             return []
         actions: list[Action] = [Stop("switch")] if switching else []
@@ -155,6 +190,7 @@ class Controller:
 
     def stop(self, now: float) -> list[Action]:
         self._set_hold(now, "manual")
+        self._end_recovery()
         if self.state in (State.STARTING, State.PLAYING):
             self._go(State.STOPPING, "manual")
             return [Stop("manual")]
@@ -164,6 +200,7 @@ class Controller:
 
     def cast_started(self, now: float) -> list[Action]:
         if self.state == State.STARTING:
+            self._end_recovery()
             self._go(State.PLAYING, "receiver playing")
             if not self.signal:
                 # e.g. a manual play before the needle drops: the silence timer starts now.
@@ -173,6 +210,22 @@ class Controller:
     def cast_failed(self, now: float, reason: CastFailure) -> list[Action]:
         if self.state != State.STARTING:
             return []
+        if self.recovering and reason != "busy":
+            assert self.recovering_since is not None
+            if not self.signal:
+                self._end_recovery()
+                self._go(State.IDLE, f"cast failed: {reason}; music stopped")
+                return []
+            if now - self.recovering_since >= self.recover_timeout_s:
+                return self._give_up(now, "speaker unreachable")
+            delay = RETRY_DELAYS_S[min(self._retries, len(RETRY_DELAYS_S) - 1)]
+            self._retries += 1
+            self._retry_at = now + delay
+            self._go(State.IDLE, f"cast failed: {reason}; retry in {delay:g} s")
+            if self._retries == 1:
+                return [Notify("warning", f"Lost {self.target}; reconnecting…")]
+            return []
+        self._end_recovery()
         self._go(State.IDLE, f"cast failed: {reason}")
         if reason == "busy":
             self._set_hold(now, "busy")
@@ -194,16 +247,15 @@ class Controller:
             self._set_hold(now, "manual" if reason == "cancelled" else "taken_over")
             what = "Stopped on the speaker" if reason == "cancelled" else "Another app took over"
             return [Notify("info", f"{what}; waiting for the next record")]
-        # error / lost: recover while the record is still playing, within the budget.
+        # error / lost: a recovery phase while the record is still playing, within the budget.
         while self._recasts and now - self._recasts[0] > self.recast_window_s:
             self._recasts.popleft()
         if self.signal and self.target and len(self._recasts) < self.recast_max:
             self._recasts.append(now)
+            self.recovering_since, self._retries, self._retry_at = now, 0, None
             self._go(State.STARTING, f"recover after {reason}")
             return [Cast(self.target, "recover")]
-        self._go(State.IDLE, f"ended: {reason}")
-        self._set_hold(now, "errors")
-        return [Notify("error", f"Playback on {self.target} failed ({reason}); gave up")]
+        return self._give_up(now, reason)
 
     def stopped(self, now: float) -> list[Action]:
         if self.state == State.STOPPING:

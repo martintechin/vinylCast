@@ -190,3 +190,72 @@ def test_transitions_are_reported() -> None:
         ("starting", "playing", "receiver playing"),
         ("playing", "stopping", "manual"),
     ]
+
+
+# ---- R5 recovery: speaker power-cycled / Wi-Fi access point restarted --------------------
+
+
+def lost_and_unreachable(c: Controller, now: float = 100.0) -> None:
+    """Connection lost while the record plays; the immediate re-cast cannot find the speaker."""
+    assert c.cast_ended(now, "lost") == [Cast(T, "recover")]
+    acts = c.cast_failed(now + 10, "not_found")
+    assert acts == [Notify("warning", f"Lost {T}; reconnecting…")]
+    assert c.state == State.IDLE and c.recovering and c.hold is None
+
+
+def test_speaker_power_cycle_recovers_with_retries() -> None:
+    c = ctl()
+    playing(c)
+    lost_and_unreachable(c, 100.0)  # retry 2 s after the failure at 110
+    assert tick_until(c, 110.0, 111.0) == []
+    assert [a for _, a in tick_until(c, 112.0, 112.0)] == [Cast(T, "recover")]
+    assert c.cast_failed(122.0, "not_found") == []  # still down: retry in 5 s, no new note
+    assert [a for _, a in tick_until(c, 123.0, 127.0)] == [Cast(T, "recover")]
+    c.cast_started(130.0)  # speaker back
+    assert c.state == State.PLAYING and not c.recovering and c.hold is None
+
+
+def test_recovery_gives_up_after_timeout() -> None:
+    c = ctl(recover_timeout_s=300)
+    playing(c)
+    lost_and_unreachable(c, 100.0)
+    t, attempts = 110.0, 0
+    while c.recovering and t < 1000:
+        for _, a in tick_until(c, t, t + 30):
+            if isinstance(a, Cast):
+                attempts += 1
+                c.cast_failed(t + 1, "not_found")
+        t += 31
+    assert not c.recovering and c.hold == "errors" and c.state == State.IDLE
+    assert 6 <= attempts <= 15  # retried for ~5 minutes with growing delays, then stopped
+
+
+def test_recovery_stops_when_the_record_ends() -> None:
+    c = ctl()
+    playing(c)
+    lost_and_unreachable(c)
+    c.signal_off(115.0)
+    assert not c.recovering and c.hold is None
+    assert tick_until(c, 115.0, 200.0) == []  # no retries without music
+    assert c.signal_on(1000.0) == [Cast(T, "needle_drop")]  # next record casts normally
+
+
+def test_recovery_respects_someone_else_taking_the_speaker() -> None:
+    c = ctl()
+    playing(c)
+    lost_and_unreachable(c)
+    tick_until(c, 110.0, 112.0)
+    c.cast_failed(113.0, "busy")
+    assert not c.recovering and c.hold == "busy"
+
+
+def test_manual_stop_or_play_ends_recovery() -> None:
+    c = ctl()
+    playing(c)
+    lost_and_unreachable(c)
+    c.stop(111.0)
+    assert not c.recovering and c.hold == "manual" and tick_until(c, 111.0, 200.0) == []
+    c2 = ctl()
+    playing(c2)
+    lost_and_unreachable(c2)
+    assert c2.play(111.0) == [Cast(T, "manual")] and not c2.recovering

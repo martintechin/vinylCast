@@ -215,7 +215,8 @@ function renderStatus(s) {
   status = s;
   const t = s.target || "no speaker chosen";
   let line;
-  if (s.state === "playing") line = "Playing on " + t;
+  if (s.recovering && s.state !== "playing") line = "Reconnecting to " + t + "…";
+  else if (s.state === "playing") line = "Playing on " + t;
   else if (s.state === "starting") line = "Starting on " + t + "…";
   else if (s.state === "stopping") line = "Stopping…";
   else if (s.hold && HOLD[s.hold]) line = HOLD[s.hold];

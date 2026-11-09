@@ -55,6 +55,15 @@ class SignalDetector:
     def latest(self) -> Level | None:
         return self.history[-1] if self.history else None
 
+    def force_off(self) -> Event | None:
+        """No readings any more (ffmpeg cannot open the input, UFO202 unplugged): treat as
+        silence instead of keeping the last state forever."""
+        self._above_since = self._below_since = None
+        if not self.signal:
+            return None
+        self.signal = False
+        return "off"
+
     def feed(self, level: Level) -> Event | None:
         self.history.append(level)
         while self.history and level.t - self.history[0].t > self.history_s:

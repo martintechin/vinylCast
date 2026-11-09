@@ -80,6 +80,7 @@ class Rig:
         self.log: list[str] = []
         self.sessions: list[FakeSession] = []
         self.session_kw = session_kw
+        self.speaker_up = True  # False = powered off / unreachable: connect() fails
         self.store = StateStore(tmp_path / "state.json")
         # Same flags for service and driver, as `daemon` does: apply_settings rebuilds the
         # config from TOML + flags, so a missing flag would change the stream URL.
@@ -93,7 +94,8 @@ class Rig:
         )  # fmt: skip
 
     def factory(self, name: str, on_end: Callable[[str], None]) -> FakeSession:
-        s = FakeSession(name, on_end, self.log, **self.session_kw)  # type: ignore[arg-type]
+        kw = {"found": self.speaker_up, **self.session_kw}
+        s = FakeSession(name, on_end, self.log, **kw)  # type: ignore[arg-type]
         s.volume = SPEAKER_VOLUMES.get(name)
         self.sessions.append(s)
         return s
@@ -253,3 +255,45 @@ async def test_status_volume_follows_the_connected_speaker(rig: Rig) -> None:
     await wait_until(lambda: rig.driver.status()["volume"] == 0.25)
     assert await rig.driver.set_volume(0.4) == 0.4
     assert rig.driver.status()["volume"] == 0.4
+
+
+# ---- R5 robustness ---------------------------------------------------------------------
+
+
+async def test_recovery_uses_a_fresh_connection(rig: Rig) -> None:
+    rig.levels(2, -30)
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    old = rig.sessions[-1]
+    old.on_end("lost")
+    await wait_until(lambda: len(rig.sessions) == 2 and state(rig) == State.PLAYING)
+    assert f"disconnect {old.name}" in rig.log
+    assert rig.log[-1].startswith("play HESTON 120")
+
+
+async def test_speaker_power_cycle_recovers(rig: Rig) -> None:
+    rig.levels(2, -30)
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    rig.speaker_up = False
+    rig.sessions[-1].on_end("lost")
+    await wait_until(lambda: rig.driver.controller.recovering and state(rig) == State.IDLE)
+    assert "reconnecting" in rig.driver.status()["notifications"][-1]["message"]
+    assert rig.driver.status()["recovering"] is True
+    rig.levels(3, -30)  # still playing at the turntable; first retry (2 s) fails again
+    await wait_until(lambda: sum(e.startswith("connect") for e in rig.log) >= 3)
+    rig.speaker_up = True  # speaker back
+    rig.levels(6, -30)  # next retry after 5 s
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    assert not rig.driver.controller.recovering and rig.driver.controller.hold is None
+
+
+async def test_input_gone_counts_as_silence(rig: Rig) -> None:
+    """UFO202 unplugged / ffmpeg cannot open it: no readings must not mean 'music forever'."""
+    rig.levels(2, -30)
+    await wait_until(lambda: state(rig) == State.PLAYING)
+    rig.now += 4  # no level readings for 4 s
+    await wait_until(lambda: not rig.driver.detector.signal)
+    assert rig.driver.controller.signal is False
+    assert rig.driver.metrics.recent[-1]["event"] in ("signal_stale", "ctl_state")
+    assert any(e["event"] == "signal_stale" for e in rig.driver.metrics.recent)
+    rig.now += 181  # and then the normal silence stop
+    await wait_until(lambda: state(rig) == State.IDLE)
