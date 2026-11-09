@@ -66,7 +66,7 @@ turntable → own phono preamp → Behringer UFO202 (USB, line in) → Raspberry
 | --- | --- | --- |
 | Board | Raspberry Pi 3 **Model B** Rev 1.2 | Wi-Fi **2.4 GHz only** |
 | CPU load | MP3 320k encode ~29 % of one core; level measurement +1.5 %; Python ~7 % | Fine on 4 cores; FLAC would be cheaper to encode |
-| Network | Wi-Fi only at the turntable; −73 dBm (ch. 11), later −69 dBm (ch. 6); 58–72 Mbit/s | Bandwidth ample (MP3 0.32, FLAC ~1 Mbit/s); weak signal is the main dropout risk. Power save disabled |
+| Network | Wi-Fi only at the turntable; −73 dBm (ch. 11), later −69 dBm (ch. 6); 58–72 Mbit/s | Bandwidth ample (MP3 0.32, FLAC ~1 Mbit/s); weak signal is the main dropout risk. Power save disabled (persists across reboots) |
 | Audio interface | UFO202 = TI/Burr-Brown PCM2902, **USB full speed (1.1)**, capture **16-bit stereo**, 48/44.1/32/22.05/16/11.025 kHz, **no input gain** | Level set only at the preamp; 16-bit ceiling; 44.1 kHz used |
 | USB | Kernel reported lost capture transfers ("FIQ reported NYET. Data may have been lost") | Known Pi 3 weakness with full-speed devices on its shared USB bus; a native I²S ADC or a USB 2.0 high-speed interface avoids it |
 | Power | `get_throttled` 0x50000 (under-voltage and throttling since boot) with the first supply; after the change **0x0 over > 24 h** with service and UFO202 running | Pi 3 + USB audio needs a solid 5.1 V / 2.5 A supply; design in margin |
@@ -106,7 +106,7 @@ a 5 s startup grace). A FLAC encoder restart was bridged without interruption. E
 ## 7. Open items (detail in README)
 
 1. R4 auto-cast acceptance runs; R5 24 h unattended test with recovery.
-2. Loud-record level check; Wi-Fi power-save persistence after reboot.
+2. Loud-record level check.
 3. End-to-end latency ~2 s on Cast Lite (10–15 s on full Cast receivers and groups), parked.
 
 ## 8. Not built

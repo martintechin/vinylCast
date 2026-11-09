@@ -160,4 +160,3 @@ On the Pi 3: MP3 320k encoding ~29 % of one core, level measurement +1.5 %, fram
 | PoC M5 60-minute soak | Deferred by Martin; listening so far has been good | 62+ min of play, then `python scripts/soak_summary.py FILE`; also covered by R5's 24 h test |
 | Loudest-passage level check | No loud record at hand; loudest seen −9.9 dBFS | `vinylcast levels` on a loud record (service stopped) |
 | End-to-end latency ~2 s | Parked: Pi share ≤ ~0.2 s, the rest is the speaker's buffer | Measure needle lift → silence per codec × speaker if it becomes important |
-| Wi-Fi power save after reboot | Set via nmcli on the netplan connection | `iw dev wlan0 get power_save` after a reboot |
