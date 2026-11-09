@@ -139,7 +139,16 @@ in the UI restarts the stream in-process and re-casts (~2 s of silence on the Pi
 | MP3 320k | HESTON 120 | plays | 3.0 s | one 0.5 s rebuffer right after start (accepted) |
 | FLAC | Tvättstugan (Nest Mini) | plays | 3.9 s | survives an encoder restart |
 | FLAC | HESTON 120 | plays | 1.4 s | same startup rebuffer |
-| either | Cast group | not tested | | no group yet |
+| MP3 320k | Xiaomi Mi Smart Speaker | plays | reports PLAYING ~1.5 s, **sound after ~10 s** | full Cast player (Chrome UA) buffers ~10 s |
+| MP3 320k | Group "Testgroup" (Nest Mini + Xiaomi) | plays in sync | reports PLAYING 3.3 s, **sound after 10–15 s** | leader = Xiaomi; group delay follows the slowest member |
+
+Two speaker classes behave differently. **"Cast Lite"** receivers (Nest Mini, HESTON 120) start
+within ~5 s of the needle and lag ~2 s. **Full Cast** receivers (Xiaomi, and groups containing
+one) collect ~10 s before playing, so they start ~10–15 s after the needle and lag about as much;
+their reported PLAYING state comes long before the sound. Not changeable from the Pi (only a
+custom Cast receiver app could), so they suit background listening, not "drop the needle, hear it".
+HESTON 120 and the Xiaomi did not show up at first when creating Google Home speaker groups
+(third-party group support is maker-dependent); the Xiaomi could be grouped later.
 
 On the Pi 3: MP3 320k encoding ~29 % of one core, level measurement +1.5 %, framing 0.1–0.3 %.
 
@@ -149,7 +158,6 @@ On the Pi 3: MP3 320k encoding ~29 % of one core, level measurement +1.5 %, fram
 | --- | --- | --- |
 | R4 auto-cast acceptance | Test runs pending | Play records over time with `metrics_path = "./r4.jsonl"`; then `python scripts/r4_summary.py r4.jsonl --idle-from HH:MM --idle-to HH:MM` |
 | PoC M5 60-minute soak | Deferred by Martin; listening so far has been good | 62+ min of play, then `python scripts/soak_summary.py FILE`; also covered by R5's 24 h test |
-| Cast group checks | No speaker group exists yet | Create one in Google Home; play to it from the UI |
 | Loudest-passage level check | No loud record at hand; loudest seen −9.9 dBFS | `vinylcast levels` on a loud record (service stopped) |
 | End-to-end latency ~2 s | Parked: Pi share ≤ ~0.2 s, the rest is the speaker's buffer | Measure needle lift → silence per codec × speaker if it becomes important |
 | Wi-Fi power save after reboot | Set via nmcli on the netplan connection | `iw dev wlan0 get power_save` after a reboot |

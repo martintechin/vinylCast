@@ -28,8 +28,8 @@ turntable → own phono preamp → Behringer UFO202 (USB, line in) → Raspberry
 - **Codecs:** MP3 320 kbit/s (default) and FLAC 16-bit; switchable while playing (~2 s gap).
 - **Runs as a systemd service** (`vinylcast daemon`), clean start/stop; settings and the last
   speaker persist across restarts (`state.json`).
-- **Speakers verified:** "Tvättstugan" (Google Nest Mini) and "HESTON 120", MP3 and FLAC. No
-  Cast group tested yet (none exists).
+- **Speakers verified:** "Tvättstugan" (Google Nest Mini) and "HESTON 120" (Marshall), MP3 and
+  FLAC; "Xiaomi" (Mi Smart Speaker), MP3; a Cast group (Nest Mini + Xiaomi) plays in sync.
 - **Tests:** 187 automated tests (pytest, no hardware needed); hardware and speaker checks were
   run by Martin on the Pi and documented per milestone.
 
@@ -75,9 +75,18 @@ turntable → own phono preamp → Behringer UFO202 (USB, line in) → Raspberry
 | Input exclusivity | ALSA `hw:` device: one program at a time | `levels` cannot run while the service runs |
 | ffmpeg 7 (Pi OS) | A measuring `asplit` branch with long blocks stalls the stream | Measurement runs inline in 100 ms blocks instead |
 
-## 5. Receiver behaviour observed (both speakers)
+## 5. Receiver behaviour observed
 
-`User-Agent: Cast Lite`, `GET` only over HTTP/1.1 keep-alive, no `HEAD`, no `Range`, no ICY
+Two classes. **Cast Lite** (Nest Mini, Marshall HESTON 120): start ~5 s after needle drop,
+~2 s lag. **Full Cast player** (Xiaomi Mi Smart Speaker, Chrome User-Agent; and any group led by
+such a device): reports PLAYING after 1.5–3.3 s but buffers ~10 s, so sound starts 10–15 s after
+the needle and lags as much. Groups play in sync; the leader (here the Xiaomi) fetches the stream
+and the group delay follows the slowest member. HESTON 120 and the Xiaomi did not appear at first
+when creating a Google Home speaker group (third-party group support depends on the maker); the
+Xiaomi could be grouped later. Only a custom Cast receiver app could shorten the full player's
+buffer.
+
+Cast Lite details: `User-Agent: Cast Lite`, `GET` only over HTTP/1.1 keep-alive, no `HEAD`, no `Range`, no ICY
 metadata; accepts endless chunked MP3 and FLAC. Startup 1.4–3.9 s depending on speaker and codec.
 HESTON 120 always rebuffers once for ~0.5 s right after starting (accepted; the soak summary has
 a 5 s startup grace). A FLAC encoder restart was bridged without interruption. End-to-end latency
