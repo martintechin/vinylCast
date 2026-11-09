@@ -33,7 +33,7 @@ not remove either path. Targets in use: "HESTON 120" (192.168.1.65) and
 "Tvättstugan" (Nest Mini, 192.168.1.124); both "Cast Lite" receivers.
 
 Revision 1 per `docs/PLAN-rev1.md`: R0 done (inline 100 ms measurement, threshold −40 dBFS;
-24 h power check pending), R1 done (`vinylcast daemon` on the Pi: needle drop → HESTON 120 in
+power 0x0 after > 24 h), R1 done (`vinylcast daemon` on the Pi: needle drop → HESTON 120 in
 ~5 s, stop 180 s after silence), R2 done (web API + SSE; codec switch while playing ~2 s on the
 Pi), R3 done (phone UI accepted on Android Chrome). Next: R4 auto-cast acceptance (10 needle-drop
 cycles, side flip, manual stop, 2 h idle; tooling `scripts/r4_summary.py` ready, the systemd

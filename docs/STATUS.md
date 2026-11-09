@@ -40,7 +40,7 @@ turntable → own phono preamp → Behringer UFO202 (USB, line in) → Raspberry
 | PoC M0–M4: skeleton, encode/serve, framing, Cast control, Pi + ALSA + systemd | done |
 | PoC M5: soak tooling | done; the 60-min run is deferred (covered later by R5's 24 h test) |
 | PoC M6: codec decision | keep both, MP3 default |
-| R0: prerequisites (power, level measurement on ffmpeg 7, noise floor) | done; 24 h power check open |
+| R0: prerequisites (power, level measurement on ffmpeg 7, noise floor) | done (power: 0x0 after > 24 h) |
 | R1: control core (state machine, detector, persistence, `daemon`) | done |
 | R2: web API + live events | done |
 | R3: phone UI | done |
@@ -69,7 +69,7 @@ turntable → own phono preamp → Behringer UFO202 (USB, line in) → Raspberry
 | Network | Wi-Fi only at the turntable; −73 dBm (ch. 11), later −69 dBm (ch. 6); 58–72 Mbit/s | Bandwidth ample (MP3 0.32, FLAC ~1 Mbit/s); weak signal is the main dropout risk. Power save disabled |
 | Audio interface | UFO202 = TI/Burr-Brown PCM2902, **USB full speed (1.1)**, capture **16-bit stereo**, 48/44.1/32/22.05/16/11.025 kHz, **no input gain** | Level set only at the preamp; 16-bit ceiling; 44.1 kHz used |
 | USB | Kernel reported lost capture transfers ("FIQ reported NYET. Data may have been lost") | Known Pi 3 weakness with full-speed devices on its shared USB bus; a native I²S ADC or a USB 2.0 high-speed interface avoids it |
-| Power | `get_throttled` 0x50000 (under-voltage and throttling since boot) before a power-supply change; 0 in later runs | Pi 3 + USB audio needs a solid 5.1 V / 2.5 A supply; design in margin |
+| Power | `get_throttled` 0x50000 (under-voltage and throttling since boot) with the first supply; after the change **0x0 over > 24 h** with service and UFO202 running | Pi 3 + USB audio needs a solid 5.1 V / 2.5 A supply; design in margin |
 | Input level | Music RMS −34 … −25 dBFS, peaks up to −9.9 dBFS | ~9 dB headroom with the current preamp setting |
 | Noise floor | Stylus up −64 … −55 dBFS; groove noise (lead-in, run-out) up to −46 … −50 dBFS | Detection: on at −40, off below −46 dBFS |
 | Input exclusivity | ALSA `hw:` device: one program at a time | `levels` cannot run while the service runs |
@@ -97,10 +97,9 @@ a 5 s startup grace). A FLAC encoder restart was bridged without interruption. E
 ## 7. Open items (detail in README)
 
 1. R4 auto-cast acceptance runs; R5 24 h unattended test with recovery.
-2. Power: confirm `get_throttled` stays 0x0 over 24 h.
-3. Cast group test (needs a group in Google Home).
-4. Loud-record level check; Wi-Fi power-save persistence after reboot.
-5. End-to-end latency ~2 s, parked.
+2. Cast group test (needs a group in Google Home).
+3. Loud-record level check; Wi-Fi power-save persistence after reboot.
+4. End-to-end latency ~2 s, parked.
 
 ## 8. Not built
 

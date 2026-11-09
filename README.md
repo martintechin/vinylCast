@@ -16,7 +16,7 @@ speaker stops after a silence timeout. A phone web page shows what is happening 
 | PoC M0–M4 | done |
 | PoC M5 soak test | tooling done; the 60-minute run is deferred |
 | PoC M6 codec decision | keep both codecs, MP3 320k default |
-| Rev 1 R0 prerequisites | done (level measurement, detection threshold); 24 h power check open |
+| Rev 1 R0 prerequisites | done (level measurement, detection threshold, power: `get_throttled` 0x0 after > 24 h) |
 | Rev 1 R1 control core (needle drop → cast, silence → stop) | done |
 | Rev 1 R2 web API + live events | done |
 | Rev 1 R3 phone UI | done (Android Chrome) |
@@ -148,7 +148,6 @@ On the Pi 3: MP3 320k encoding ~29 % of one core, level measurement +1.5 %, fram
 | Item | Why open | How to close |
 | --- | --- | --- |
 | R4 auto-cast acceptance | Test runs pending | Play records over time with `metrics_path = "./r4.jsonl"`; then `python scripts/r4_summary.py r4.jsonl --idle-from HH:MM --idle-to HH:MM` |
-| Power check (R0) | `get_throttled` showed 0x50000 (under-voltage and throttling since boot) before the power supply change | After 24 h uptime: `vcgencmd get_throttled` must be `0x0` |
 | PoC M5 60-minute soak | Deferred by Martin; listening so far has been good | 62+ min of play, then `python scripts/soak_summary.py FILE`; also covered by R5's 24 h test |
 | Cast group checks | No speaker group exists yet | Create one in Google Home; play to it from the UI |
 | Loudest-passage level check | No loud record at hand; loudest seen −9.9 dBFS | `vinylcast levels` on a loud record (service stopped) |

@@ -51,7 +51,7 @@ These are gates: the milestone that needs them does not start until they pass.
 
 | Item | Why it matters now | Gate for |
 | --- | --- | --- |
-| Under-voltage fixed (`get_throttled` stays `0x0` for 24 h with UFO202 attached) | Always-on device; under-voltage also causes USB capture loss | R0 |
+| Under-voltage fixed (`get_throttled` stays `0x0` for 24 h with UFO202 attached) — **done 2026-11-09: 0x0 after > 24 h uptime** | Always-on device; under-voltage also causes USB capture loss | R0 |
 | Level measurement works on the Pi's ffmpeg 7 (spike, see R0) — **done: inline 100 ms** | Needle-drop detection and live levels depend on it | R1 |
 | Noise floor measured (stylus up, silent groove, run-out groove, music) — **done: −40 dBFS** | Sets the detection thresholds | R4 |
 | 60-min soak (deferred M5) | Always-on playback must be stable | R5 |
