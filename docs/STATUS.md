@@ -106,9 +106,8 @@ a 5 s startup grace). A FLAC encoder restart was bridged without interruption. E
 ## 7. Open items (detail in README)
 
 1. R4 auto-cast acceptance runs; R5 24 h unattended test with recovery.
-2. Cast group test (needs a group in Google Home).
-3. Loud-record level check; Wi-Fi power-save persistence after reboot.
-4. End-to-end latency ~2 s, parked.
+2. Loud-record level check; Wi-Fi power-save persistence after reboot.
+3. End-to-end latency ~2 s on Cast Lite (10–15 s on full Cast receivers and groups), parked.
 
 ## 8. Not built
 

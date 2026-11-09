@@ -30,7 +30,10 @@ M0-M4 done. M5 code done; the 60-min soak run is deferred by Martin (see README 
 items", which also lists the open group checks, loud-record level check, peak logging on ffmpeg 7
 and Wi-Fi power-save persistence). Codec decision (M6, Martin): keep BOTH codecs, MP3 320k is the default, FLAC is a setting; do
 not remove either path. Targets in use: "HESTON 120" (192.168.1.65) and
-"Tvättstugan" (Nest Mini, 192.168.1.124); both "Cast Lite" receivers.
+"Tvättstugan" (Nest Mini, 192.168.1.124); both "Cast Lite" receivers. "Xiaomi" (Mi Smart Speaker,
+192.168.1.54) is a FULL Cast player (Chrome UA): reports PLAYING early but buffers ~10 s, so sound
+starts 10–15 s after the needle; groups led by it likewise (group "Testgroup" = Nest Mini + Xiaomi,
+plays in sync). cast_startup measures the reported state, not audible sound, for such receivers.
 
 Revision 1 per `docs/PLAN-rev1.md`: R0 done (inline 100 ms measurement, threshold −40 dBFS;
 power 0x0 after > 24 h), R1 done (`vinylcast daemon` on the Pi: needle drop → HESTON 120 in
