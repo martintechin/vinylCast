@@ -20,7 +20,15 @@ dependencies = [
 dev = [
     "pytest==9.2.0",
     "pytest-asyncio==1.4.1.post1",
+    "gpiozero==2.0.1.post3",  # status LED tests use its mock pins (no hardware)
     "ruff==0.16.9",
+]
+
+# Status LED on the Pi. lgpio has no prebuilt wheel for the Pi's arm64/Python 3.13: it is
+# compiled on install and needs `apt install swig python3-dev liblgpio-dev` (deploy.sh --led).
+led = [
+    "gpiozero==2.0.1.post3",
+    "lgpio==0.2.2.0",
 ]
 
 [project.scripts]

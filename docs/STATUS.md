@@ -24,6 +24,10 @@ turntable → own phono preamp → Behringer UFO202 (USB, line in) → Raspberry
   speaker choice, live input meter with clipping warning, settings sheet (auto-cast, codec,
   threshold, timings), diagnostics (Wi-Fi, throttling, CPU, events). Live via Server-Sent Events,
   no external resources, accepted on Android Chrome.
+- **Status LED** (optional, RGB on GPIO 17/22/23 via gpiozero + lgpio): dim white listening,
+  blue blinking starting, dim green playing, dim blue manual hold, yellow blinking speaker
+  busy/unavailable/reconnecting, red error, off when the service is not running. For custom
+  hardware: three PWM-capable GPIOs; lgpio is compiled on the Pi (no arm64/3.13 wheel).
 - **HTTP API** (JSON + SSE) behind the UI; LAN only, no authentication in revision 1.
 - **Codecs:** MP3 320 kbit/s (default) and FLAC 16-bit; switchable while playing (~2 s gap).
 - **Runs as a systemd service** (`vinylcast daemon`), clean start/stop; settings and the last

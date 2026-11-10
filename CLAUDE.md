@@ -147,6 +147,9 @@ driver re-casts). `run` is unchanged (PoC behaviour). Recovery (for R5): a lost 
 receiver error while music plays starts a recovery phase in the controller (re-cast at once,
 then retries after 2/5/10/20/30 s for up to 5 min; ends on success, silence, manual play/stop or
 a busy speaker); every recovery attempt and every failed cast uses a fresh connection. No level
-readings for 3 s (input gone) = silence (`signal_stale`).
+readings for 3 s (input gone) = silence (`signal_stale`). Status LED (statusled.py, Martin's
+mapping, off by default): pure `led_state()` + gpiozero RGBLED (PWM) in the daemon; optional
+extra `led` (gpiozero + lgpio, compiled on the Pi: deploy.sh --led); any GPIO error is logged
+(`status_led_error`) and never fatal; tests use gpiozero's MockFactory(pin_class=MockPWMPin).
 
 Module boundaries matter: revision 1 replaces `cli.py` with a web UI without touching the audio path.

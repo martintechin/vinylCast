@@ -44,6 +44,11 @@ Behaviour:
 - Stopped by hand (page, Google Home app, voice) → no auto-cast until the record has ended
 - Speaker busy with another app → not taken over; shown on the page
 
+Optional status LED (RGB LED on GPIO 17/22/23, `status_led = true`, install with
+`scripts/deploy.sh --led`): dim white = listening; blue blinking = starting; dim green =
+playing; dim blue = stopped by hand; yellow blinking = speaker busy/unavailable/reconnecting;
+red = error (recovery gave up, encoder down, under-voltage now); off = service not running.
+
 ## Install / update on the Pi
 
 ```sh
@@ -51,6 +56,7 @@ git clone <repo> ~/vinylcast && cd ~/vinylcast
 scripts/deploy.sh          # apt ffmpeg/alsa-utils if missing, venv + install, vinylcast.toml,
                            # systemd unit; restarts the service if it is running
 scripts/deploy.sh --enable # also start at boot
+scripts/deploy.sh --led    # status LED: apt swig python3-dev liblgpio-dev, pip extra [led]
 ```
 
 `deploy.sh` runs on the Pi itself (`git pull` unless `--no-pull`). Commands outside the service
@@ -76,6 +82,7 @@ Keys worth knowing:
 | `measure_levels`, `peak_log_s` | `true`, `10` | Level measurement in ffmpeg; peak logged every 10 s |
 | `metrics_path` | `./metrics.jsonl` | JSONL event log; strftime codes allowed |
 | `log_level` | `info` | `debug` adds routine events (input_peak, http_request) to the console |
+| `status_led`, `led_pins`, `led_brightness` | `false`, `[17, 22, 23]`, `1.0` | RGB status LED (needs `deploy.sh --led`) |
 
 ## Commands
 

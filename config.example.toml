@@ -75,3 +75,10 @@ recast_max = 3
 
 # Persistent state: last speaker and settings changed in the web UI.
 state_path = "./state.json"
+
+# --- Status LED (RGB LED on GPIO; needs the `led` extra: scripts/deploy.sh --led) ---
+# idle: dim white; starting: blue blinking; playing: dim green; stopped by hand: dim blue;
+# speaker busy/unavailable/reconnecting: yellow blinking; error: red.
+status_led = false
+led_pins = [17, 22, 23]   # BCM numbers for red, green, blue
+led_brightness = 1.0      # scales all colours (0..1), e.g. 0.3 for a dark room

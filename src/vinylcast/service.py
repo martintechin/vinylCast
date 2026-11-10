@@ -252,6 +252,17 @@ async def run_daemon(toml_path: Any, overrides: dict[str, Any]) -> int:
     if not await _start_or_report(service):
         return 1
     browser.start()
+    led_task = None
+    if cfg.status_led:
+        from vinylcast.statusled import StatusLed, led_state
+
+        def current_led() -> str:
+            health = service.metrics.latest.get("health") or {}
+            return led_state(driver.status(), service.encoder.status()["state"],
+                             health.get("throttled"))  # fmt: skip
+
+        led = StatusLed(cfg.led_pins, current_led, service.metrics, brightness=cfg.led_brightness)
+        led_task = asyncio.create_task(led.run())
     target = driver.controller.target
     print(f"Listening on {cfg.source}; on needle drop: cast to {target or '(no speaker yet)'} "
           f"at {stream_url(cfg)}  (Ctrl-C to stop)", flush=True)  # fmt: skip
@@ -265,6 +276,10 @@ async def run_daemon(toml_path: Any, overrides: dict[str, Any]) -> int:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        if led_task is not None:
+            led_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await led_task
         await asyncio.to_thread(browser.stop)
         await service.stop()
     return 0

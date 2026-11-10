@@ -10,7 +10,7 @@ After=network-online.target sound.target
 [Service]
 Type=simple
 User=@USER@
-SupplementaryGroups=audio
+SupplementaryGroups=audio gpio
 WorkingDirectory=@DIR@
 ExecStart=@DIR@/.venv/bin/vinylcast daemon --config @DIR@/vinylcast.toml
 Environment=PYTHONUNBUFFERED=1

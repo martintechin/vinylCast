@@ -42,6 +42,10 @@ def _common_parser() -> argparse.ArgumentParser:
     g.add_argument("--stop-after-silence-s", type=float)
     g.add_argument("--recast-max", type=int)
     g.add_argument("--state-path")
+    g.add_argument("--status-led", action=argparse.BooleanOptionalAction)
+    g.add_argument("--led-pins", type=lambda s: [int(p) for p in s.split(",")],
+                   help="red,green,blue GPIO (BCM) numbers, e.g. 17,22,23")  # fmt: skip
+    g.add_argument("--led-brightness", type=float)
     g.add_argument("--metrics-path", help="JSONL log; strftime codes allowed (%%Y%%m%%d-%%H%%M)")
     return p
 
@@ -67,6 +71,9 @@ CONFIG_KEYS = (
     "stop_after_silence_s",
     "recast_max",
     "state_path",
+    "status_led",
+    "led_pins",
+    "led_brightness",
 )
 
 

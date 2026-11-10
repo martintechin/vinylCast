@@ -48,6 +48,10 @@ class Config:
     stop_after_silence_s: float = 180.0  # silence before stopping (longer than a side flip)
     recast_max: int = 3  # automatic re-casts allowed per 10 minutes
     state_path: str = "./state.json"
+    # Status LED (RGB, GPIO BCM pins red, green, blue). Needs the `led` extra on the Pi.
+    status_led: bool = False
+    led_pins: tuple[int, ...] = (17, 22, 23)
+    led_brightness: float = 1.0  # scales every LED colour (0..1)
 
     @property
     def mp3_bitrate_bps(self) -> int:
@@ -76,10 +80,13 @@ _TYPES: dict[str, tuple[type, ...]] = {
     "stop_after_silence_s": (int, float),
     "recast_max": (int,),
     "state_path": (str,),
+    "status_led": (bool,),
+    "led_pins": (list, tuple),
+    "led_brightness": (int, float),
 }
 _FLOATS = (
     "client_max_buffer_s", "tone_beep_s", "peak_log_s",
-    "detect_threshold_db", "detect_on_s", "stop_after_silence_s",
+    "detect_threshold_db", "detect_on_s", "stop_after_silence_s", "led_brightness",
 )  # fmt: skip
 
 # Keys the web UI may change (persisted in state.json). Never paths, devices or ports.
@@ -106,6 +113,10 @@ def _coerce(values: dict[str, Any], origin: str) -> dict[str, Any]:
             value = None
         if key in _FLOATS:
             value = float(value)
+        if key == "led_pins":
+            if not all(isinstance(p, int) and not isinstance(p, bool) for p in value):
+                raise ConfigError(f"{origin}: led_pins must be three GPIO numbers")
+            value = tuple(value)
         out[key] = value
     return out
 
@@ -137,6 +148,14 @@ def _validate(cfg: Config) -> None:
         raise ConfigError(f"detect_on_s must be positive: {cfg.detect_on_s}")
     if cfg.stop_after_silence_s <= 0:
         raise ConfigError(f"stop_after_silence_s must be positive: {cfg.stop_after_silence_s}")
+    if (
+        len(cfg.led_pins) != 3
+        or len(set(cfg.led_pins)) != 3
+        or not all(0 <= p <= 27 for p in cfg.led_pins)
+    ):
+        raise ConfigError(f"led_pins must be three different GPIO numbers 0-27: {cfg.led_pins}")
+    if not 0 <= cfg.led_brightness <= 1:
+        raise ConfigError(f"led_brightness must be 0..1: {cfg.led_brightness}")
     if cfg.recast_max < 0:
         raise ConfigError(f"recast_max must be >= 0: {cfg.recast_max}")
 
