@@ -188,6 +188,14 @@
 const $ = (id) => document.getElementById(id);
 const MIN_DB = -60;
 let status = null, settings = null, devices = [];
+// "This phone" mode: the browser plays the stream itself, so the phone's own audio output
+// (e.g. a paired Bluetooth speaker) is used. Purely client-side; remembered per phone.
+const LOCAL = "__local__";
+let localMode = false;
+try { localMode = localStorage.getItem("vc_local") === "1"; } catch (e) { /* storage blocked */ }
+let wantLocal = false, localTimer = null, localCodec = null;
+const audio = new Audio();
+audio.preload = "none";
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -215,14 +223,15 @@ function renderStatus(s) {
   status = s;
   const t = s.target || "no speaker chosen";
   let line;
-  if (s.recovering && s.state !== "playing") line = "Reconnecting to " + t + "…";
+  if (localMode) line = wantLocal ? "Playing on this phone" : "Tap play to listen on this phone";
+  else if (s.recovering && s.state !== "playing") line = "Reconnecting to " + t + "…";
   else if (s.state === "playing") line = "Playing on " + t;
   else if (s.state === "starting") line = "Starting on " + t + "…";
   else if (s.state === "stopping") line = "Stopping…";
   else if (s.hold && HOLD[s.hold]) line = HOLD[s.hold];
   else line = s.auto_cast ? "Waiting for the needle" : "Idle (auto-cast off)";
   $("state").textContent = line;
-  $("sub").textContent = [s.target ? "Speaker: " + s.target : "Choose a speaker below",
+  $("sub").textContent = [localMode ? "This phone" : (s.target ? "Speaker: " + s.target : "Choose a speaker below"),
                           (s.codec || "").toUpperCase(), s.clients + " listener" + (s.clients === 1 ? "" : "s")]
                           .join(" · ");
   const note = (s.notifications || []).slice(-1)[0];
@@ -230,9 +239,10 @@ function renderStatus(s) {
   n.className = "note" + (note ? " " + note.level : "");
   n.textContent = note ? note.message : "";
   const active = s.state === "playing" || s.state === "starting";
-  $("play").disabled = active || !s.target;
-  $("stop").disabled = !active;
+  $("play").disabled = localMode ? wantLocal : (active || !s.target);
+  $("stop").disabled = localMode ? !wantLocal : !active;
   renderVolume(s);
+  if (wantLocal && localCodec && s.codec && s.codec !== localCodec) startLocal();  // codec switched
   $("signal").textContent = s.signal ? "♪ music" : "silence";
   if (s.level) renderLevel(s.level);
   renderDevices();
@@ -241,7 +251,7 @@ function renderStatus(s) {
 let volTouched = 0;  // the slider follows the speaker except while the user is moving it
 function renderVolume(s) {
   const vol = $("vol"), known = s.volume !== null && s.volume !== undefined;
-  vol.disabled = !known || s.state !== "playing";
+  vol.disabled = localMode || !known || s.state !== "playing";  // on the phone: use its volume keys
   if (!known) { $("volval").textContent = ""; return; }
   if (Date.now() - volTouched < 1500) return;
   vol.value = Math.round(s.volume * 100);
@@ -260,10 +270,10 @@ function renderDevices() {
   const sel = $("speaker");
   const current = status ? status.target : null;
   const names = devices.map((d) => d.name);
-  const opts = [];
-  if (!devices.length && !current) {
+  const opts = [new Option("This phone (browser audio)", LOCAL)];
+  if (!devices.length && !current && !localMode) {
     const o = new Option("Looking for speakers…", ""); o.disabled = true; opts.push(o);
-  } else if (!current) {
+  } else if (!current && !localMode) {
     const o = new Option("Choose a speaker…", ""); o.disabled = true; opts.push(o);
   }
   for (const d of devices) {
@@ -273,10 +283,55 @@ function renderDevices() {
   }
   if (current && !names.includes(current)) opts.push(new Option(current + " (not seen yet)", current));
   sel.replaceChildren(...opts);
-  sel.value = current || "";
+  sel.value = localMode ? LOCAL : (current || "");
 }
 
-$("speaker").addEventListener("change", (e) => { if (e.target.value) chooseSpeaker(e.target.value); });
+function setLocalMode(on) {
+  localMode = on;
+  try { localStorage.setItem("vc_local", on ? "1" : "0"); } catch (e) { /* ignore */ }
+  if (!on) stopLocal();
+}
+
+function startLocal() {
+  clearTimeout(localTimer);
+  wantLocal = true;
+  localCodec = status && status.codec ? status.codec : "mp3";
+  audio.src = "/stream." + localCodec + "?t=" + Date.now();  // fresh connection every start
+  audio.play().catch((e) => { wantLocal = false; flash("Cannot play here: " + e.message); renderStatus(status); });
+  if ("mediaSession" in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({title: "Vinyl", artist: "VinylCast"});
+    navigator.mediaSession.setActionHandler("stop", stopLocal);
+    navigator.mediaSession.setActionHandler("pause", stopLocal);
+    navigator.mediaSession.setActionHandler("play", startLocal);
+  }
+  if (status) renderStatus(status);
+}
+
+function stopLocal() {
+  wantLocal = false;
+  clearTimeout(localTimer);
+  audio.pause();
+  audio.removeAttribute("src");
+  audio.load();  // closes the HTTP connection, so the Pi stops feeding this listener
+  if (status) renderStatus(status);
+}
+
+// Encoder restarts, codec switches and Wi-Fi hiccups end the stream: reconnect while wanted.
+for (const ev of ["error", "ended"]) {
+  audio.addEventListener(ev, () => {
+    if (!wantLocal) return;
+    clearTimeout(localTimer);
+    localTimer = setTimeout(() => { if (wantLocal) startLocal(); }, 2000);
+  });
+}
+
+$("speaker").addEventListener("change", (e) => {
+  const v = e.target.value;
+  if (!v) return;
+  if (v === LOCAL) { setLocalMode(true); if (status) renderStatus(status); return; }
+  setLocalMode(false);
+  chooseSpeaker(v);
+});
 
 async function chooseSpeaker(name) {
   try {
@@ -339,9 +394,11 @@ $("settings").addEventListener("submit", async (e) => {
 });
 
 $("play").addEventListener("click", async () => {
+  if (localMode) { startLocal(); return; }  // must run inside the tap (autoplay rules)
   try { renderStatus(await api("play", {})); } catch (e) { flash(e.message); }
 });
 $("stop").addEventListener("click", async () => {
+  if (localMode) { stopLocal(); return; }
   try { renderStatus(await api("stop", {})); } catch (e) { flash(e.message); }
 });
 
